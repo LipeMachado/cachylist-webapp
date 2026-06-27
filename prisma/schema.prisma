@@ -1,0 +1,78 @@
+// Prisma schema mapped to the EXISTING Supabase Postgres database that the
+// Rails app (cachylist-app) already manages. We do NOT run migrations from here
+// — the schema is owned by Rails. We only map to it and generate the client.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   Int         @id @default(autoincrement())
+  email                String      @unique @default("")
+  encryptedPassword    String      @default("") @map("encrypted_password")
+  resetPasswordToken   String?     @unique @map("reset_password_token")
+  resetPasswordSentAt  DateTime?   @map("reset_password_sent_at")
+  rememberCreatedAt    DateTime?   @map("remember_created_at")
+  username             String?     @unique
+  avatar               String?
+  createdAt            DateTime    @default(now()) @map("created_at")
+  updatedAt            DateTime    @updatedAt @map("updated_at")
+
+  mediaItems           MediaItem[]
+
+  @@map("users")
+}
+
+model MediaItem {
+  id                Int       @id @default(autoincrement())
+  userId            Int       @map("user_id")
+
+  title             String
+  description       String?
+  category          Int       @default(0)
+  status            Int       @default(0)
+
+  platform          String?
+  releaseYear       Int?      @map("release_year")
+  rating            Int?
+  notes             String?
+  coverUrl          String?   @map("cover_url")
+
+  startedAt         DateTime? @map("started_at") @db.Date
+  finishedAt        DateTime? @map("finished_at") @db.Date
+
+  currentEpisode    Int?      @map("current_episode")
+  totalEpisodes     Int?      @map("total_episodes")
+  currentSeason     Int?      @map("current_season")
+  totalSeasons      Int?      @map("total_seasons")
+
+  currentPage       Int?      @map("current_page")
+  totalPages        Int?      @map("total_pages")
+  author            String?
+
+  director          String?
+  durationMinutes   Int?      @map("duration_minutes")
+
+  hoursPlayed       Int?      @map("hours_played")
+  wantsPlatinum     Boolean   @default(false) @map("wants_platinum")
+  platinumCompleted Boolean   @default(false) @map("platinum_completed")
+
+  sortOrder         Int       @default(0) @map("sort_order")
+
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, title])
+  @@index([userId])
+  @@index([category])
+  @@index([status])
+  @@index([platform])
+  @@map("media_items")
+}
