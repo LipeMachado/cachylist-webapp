@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Bebas_Neue } from "next/font/google";
 import { SessionProvider } from "next-auth/react";
+import NextTopLoader from "nextjs-toploader";
 import "./globals.css";
 
 const inter = Inter({
@@ -39,6 +40,12 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" className={`${inter.variable} ${bebas.variable}`}>
       <body className="antialiased m-0 min-h-screen">
+        <NextTopLoader
+          color="#8d63ff"
+          height={2}
+          shadow="0 0 8px #8d63ff, 0 0 4px #8d63ff"
+          showSpinner={false}
+        />
         <SessionProvider>{children}</SessionProvider>
       </body>
     </html>

@@ -187,6 +187,25 @@ prisma/schema.prisma # mapped to users + media_items
 
 ---
 
+## Navigation & motion
+
+Navigations give immediate feedback (no "frozen page then sudden swap"):
+
+- **Top progress bar** (`nextjs-toploader`) starts on every navigation/click.
+- **Instant loading shell** — `src/app/app/loading.tsx` renders a skeleton immediately
+  while the next route streams in (Next.js Suspense, stable — no preview flags).
+- **Spatial page transitions** — `src/components/app/SpatialTransition.tsx` maps the route
+  hierarchy to a 2D space and animates the incoming page in from the matching direction
+  (deeper routes rise from below, sibling categories slide sideways). Respects
+  `prefers-reduced-motion`. Inspired by spatial transitions in SvelteKit, implemented with
+  `motion` (framer-motion).
+
+> In `npm run dev`, the *first* visit to a route is slower because Next.js compiles it on
+> demand. Production (`npm run build && npm start`) navigations are much snappier — routes are
+> precompiled and prefetched. The newer Next.js 16.3 "Instant Navigations" (Cache Components /
+> Partial Prefetching) is still a **preview**; this app intentionally sticks to stable APIs and
+> can adopt it later once it ships stable.
+
 ## License
 
 No license file is included yet. If you intend to open-source this, add one (e.g. `MIT`).
