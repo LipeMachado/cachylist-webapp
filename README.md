@@ -126,8 +126,25 @@ The app deploys cleanly to any Node host (Vercel, Render, Railway, Fly, a VPS, D
 3. Keep `AUTH_TRUST_HOST="true"` when the platform terminates TLS in front of the app.
 4. Make sure `DATABASE_URL` uses a pooled connection on serverless platforms.
 
-On Vercel, `prisma generate` runs automatically during the build; run `prisma db push` once against
-your database beforehand.
+### Deploy to Vercel (and fixing 404s)
+
+If routes return **404** on Vercel, it's almost always one of these — check in order:
+
+1. **Root Directory** — this Next app lives in the `cachylist-webapp/` subfolder. In
+   Vercel → *Project → Settings → General → Root Directory*, set it to `cachylist-webapp`
+   (otherwise Vercel builds the repo root, finds no Next app, and every route 404s).
+2. **Environment variables** — add **all** of them in *Settings → Environment Variables*
+   (`DATABASE_URL`, `AUTH_SECRET`, `AUTH_TRUST_HOST=true`, and any API keys). A missing
+   `AUTH_SECRET`/`DATABASE_URL` makes auth-protected routes fail. Redeploy after adding them.
+3. **Prisma client** — generation runs automatically (`postinstall` + `build` both run
+   `prisma generate`), so no manual step is needed. Run `npx prisma db push` once against your
+   database (from your machine, with a direct connection) to create the tables before first use.
+4. **Framework preset** — should be detected as **Next.js**; Build Command `npm run build`,
+   Install Command `npm install`, Output handled by Next automatically. Don't set a custom
+   Output Directory.
+
+> Route protection uses `src/proxy.ts` (the Next.js 16 replacement for the deprecated
+> `middleware` convention) — no extra Vercel config is required for it.
 
 ---
 
@@ -163,7 +180,7 @@ src/
     services/        # tmdb / anilist / steam / import
     actions/         # server actions (media, account, import)
     auth.ts, session.ts, prisma.ts
-  middleware.ts      # route protection
+  proxy.ts           # route protection (Next.js 16 "proxy" convention)
 prisma/schema.prisma # mapped to users + media_items
 ```
 

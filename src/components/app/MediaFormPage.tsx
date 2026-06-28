@@ -1,7 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import MediaForm, { type MediaFormValues } from "./MediaForm";
+import MediaForm from "./MediaForm";
+import { type MediaFormValues } from "@/lib/media-form";
 
 // Non-modal form wrapper for the new/edit pages.
 export default function MediaFormPage({

@@ -1,4 +1,4 @@
-import { EMPTY_MEDIA_VALUES } from "@/components/app/MediaForm";
+import { EMPTY_MEDIA_VALUES } from "@/lib/media-form";
 import MediaFormPage from "@/components/app/MediaFormPage";
 import { CATEGORY_TO_INT, type CategoryKey } from "@/lib/media";
 

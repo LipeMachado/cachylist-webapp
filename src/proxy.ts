@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import { authConfig } from "@/auth.config";
 
+// Next.js 16 renamed the "middleware" convention to "proxy". Same signature.
 const { auth } = NextAuth(authConfig);
 
 // Protect the private app area. Everything under /app plus the account edit page

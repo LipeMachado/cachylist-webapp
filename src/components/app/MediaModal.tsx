@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
-import MediaForm, { EMPTY_MEDIA_VALUES, type MediaFormValues } from "./MediaForm";
+import MediaForm from "./MediaForm";
+import { EMPTY_MEDIA_VALUES, type MediaFormValues } from "@/lib/media-form";
 import { categoryLabel, type CategoryKey, type StatusKey } from "@/lib/media";
 import type { OpenMediaOptions } from "./app-context";
 

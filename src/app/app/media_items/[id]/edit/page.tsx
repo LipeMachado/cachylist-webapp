@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { categoryKey, statusKey } from "@/lib/media";
-import { mediaItemToFormValues } from "@/components/app/MediaForm";
+import { mediaItemToFormValues } from "@/lib/media-form";
 import MediaFormPage from "@/components/app/MediaFormPage";
 
 export default async function EditMediaPage({
