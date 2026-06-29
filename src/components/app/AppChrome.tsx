@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
+import { avatarPath } from "@/lib/media";
 import { AppModalContext, type AppUser, type OpenMediaOptions } from "./app-context";
 import Sidebar from "./Sidebar";
 import MediaModal from "./MediaModal";
@@ -28,6 +29,20 @@ export default function AppChrome({
   const [mediaOpen, setMediaOpen] = useState(false);
   const [mediaOptions, setMediaOptions] = useState<OpenMediaOptions>({});
   const [modal, setModal] = useState<ModalName>(null);
+
+  // Optimistic avatar: updated instantly on save so the sidebar/header reflect
+  // the new avatar while the server action persists in the background. `null`
+  // means "no override" — fall back to whatever the server sent.
+  const [optimisticAvatar, setOptimisticAvatar] = useState<string | null>(null);
+  const effectiveUser = useMemo<AppUser>(() => {
+    if (!optimisticAvatar || optimisticAvatar === user.avatar) return user;
+    return {
+      ...user,
+      avatar: optimisticAvatar,
+      avatarUrl: avatarPath(optimisticAvatar),
+    };
+  }, [user, optimisticAvatar]);
+  const applyAvatar = useCallback((avatar: string) => setOptimisticAvatar(avatar), []);
 
   // Restore persisted collapse state (localStorage is client-only, so post-mount).
   useEffect(() => {
@@ -69,7 +84,8 @@ export default function AppChrome({
   }, []);
 
   const ctx = {
-    user,
+    user: effectiveUser,
+    applyAvatar,
     openMediaModal,
     openAvatarModal: () => setModal("avatar"),
     openPasswordModal: () => setModal("password"),
@@ -103,7 +119,7 @@ export default function AppChrome({
       </div>
 
       {mediaOpen && <MediaModal options={mediaOptions} onClose={() => setMediaOpen(false)} />}
-      <AvatarModal open={modal === "avatar"} onClose={() => setModal(null)} user={user} />
+      <AvatarModal open={modal === "avatar"} onClose={() => setModal(null)} user={effectiveUser} />
       <PasswordModal open={modal === "password"} onClose={() => setModal(null)} />
       <LogoutModal open={modal === "logout"} onClose={() => setModal(null)} />
       <DeleteAccountModal open={modal === "delete"} onClose={() => setModal(null)} />

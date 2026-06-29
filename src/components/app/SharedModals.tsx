@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import Image from "next/image";
-import { X } from "lucide-react";
+import { X, Loader2 } from "lucide-react";
 import PasswordField from "@/components/PasswordField";
 import {
   updateAvatar,
@@ -12,7 +12,7 @@ import {
   type AccountState,
 } from "@/lib/actions/account";
 import { AVATAR_OPTIONS } from "@/lib/media";
-import type { AppUser } from "./app-context";
+import { useAppModal, type AppUser } from "./app-context";
 
 const ghostBtn =
   "inline-flex items-center justify-center min-h-[44px] px-5 border border-[var(--line)] bg-transparent text-[var(--muted)] text-[11px] font-semibold tracking-[.1em] uppercase cursor-pointer hover:bg-[var(--hover-bg)] hover:text-[var(--text)]";
@@ -32,25 +32,66 @@ export function AvatarModal({
   onClose: () => void;
   user: AppUser;
 }) {
+  const { applyAvatar } = useAppModal();
+  const [selected, setSelected] = useState(user.avatar);
+  const [pending, startSaving] = useTransition();
+
+  // Keep the highlighted option in sync with the current avatar each time the
+  // modal opens (the user may have changed it elsewhere since last mount).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (open) setSelected(user.avatar);
+  }, [open, user.avatar]);
+
   if (!open) return null;
+
+  const dirty = !!selected && selected !== user.avatar;
+
+  function save() {
+    if (!selected || pending) return;
+    // Optimistic: paint the new avatar across the app right away…
+    applyAvatar(selected);
+    // …then persist in the background and close once it lands.
+    const fd = new FormData();
+    fd.set("avatar", selected);
+    startSaving(async () => {
+      await updateAvatar(fd);
+      onClose();
+    });
+  }
+
   return (
     <>
-      <div className="fixed inset-0 z-[85] bg-[var(--overlay-bg)]" onClick={onClose} />
+      <div className="fixed inset-0 z-[85] bg-[var(--overlay-bg)]" onClick={pending ? undefined : onClose} />
       <section className="fixed z-[90] left-1/2 top-1/2 w-[min(720px,calc(100vw-32px))] max-h-[calc(100dvh-32px)] overflow-auto -translate-x-1/2 -translate-y-1/2 bg-[var(--surface)] border border-[var(--line)] p-4 md:p-8 shadow-[0_24px_80px_rgba(0,0,0,.65)]" role="dialog" aria-modal="true">
         <div className="flex items-start justify-between gap-6 mb-6">
           <div>
             <p className="brutalist-kicker mb-2">Perfil</p>
             <h3 className="text-2xl font-black uppercase tracking-[-.06em] m-0">Escolher avatar</h3>
           </div>
-          <button className="w-9 h-9 border border-[var(--line)] bg-transparent text-[var(--muted)] grid place-items-center cursor-pointer hover:bg-[var(--hover-bg)] hover:text-[var(--text)]" type="button" onClick={onClose}>
+          <button className="w-9 h-9 border border-[var(--line)] bg-transparent text-[var(--muted)] grid place-items-center cursor-pointer hover:bg-[var(--hover-bg)] hover:text-[var(--text)] disabled:opacity-50" type="button" onClick={onClose} disabled={pending}>
             <X size={18} />
           </button>
         </div>
-        <form action={updateAvatar} className="grid gap-6">
+        <form
+          className="grid gap-6"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save();
+          }}
+        >
           <div className="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-3">
             {AVATAR_OPTIONS.map((avatar) => (
               <label key={avatar} className="block cursor-pointer">
-                <input type="radio" name="avatar" value={avatar} defaultChecked={user.avatar === avatar} className="peer sr-only" />
+                <input
+                  type="radio"
+                  name="avatar"
+                  value={avatar}
+                  checked={selected === avatar}
+                  onChange={() => setSelected(avatar)}
+                  disabled={pending}
+                  className="peer sr-only"
+                />
                 <span className="block aspect-square border border-[var(--line)] p-1 bg-[var(--bg)] transition-[border-color,background] duration-150 peer-checked:border-[var(--accent-strong)] peer-checked:bg-[var(--hover-bg)] hover:bg-[var(--hover-bg)] overflow-hidden">
                   <Image src={`/${avatar}`} alt="Avatar" width={72} height={72} className="w-full h-full object-cover grayscale-[15%]" />
                 </span>
@@ -58,11 +99,21 @@ export function AvatarModal({
             ))}
           </div>
           <div className="flex justify-end gap-3">
-            <button type="button" onClick={onClose} className={ghostBtn}>
+            <button type="button" onClick={onClose} disabled={pending} className={`${ghostBtn} disabled:opacity-50`}>
               Cancelar
             </button>
-            <button type="submit" className="inline-flex items-center justify-center min-h-[44px] px-5 border border-[var(--line)] bg-[var(--panel-bg)] text-[var(--text)] text-[11px] font-semibold tracking-[.1em] uppercase cursor-pointer hover:bg-[var(--hover-bg)]">
-              Salvar avatar
+            <button
+              type="submit"
+              disabled={pending || !dirty}
+              className="inline-flex items-center justify-center gap-2 min-h-[44px] px-5 border border-[var(--line)] bg-[var(--panel-bg)] text-[var(--text)] text-[11px] font-semibold tracking-[.1em] uppercase cursor-pointer hover:bg-[var(--hover-bg)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {pending ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" /> Salvando…
+                </>
+              ) : (
+                "Salvar avatar"
+              )}
             </button>
           </div>
         </form>

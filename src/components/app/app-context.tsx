@@ -20,6 +20,7 @@ export interface OpenMediaOptions {
 
 interface AppModalContextValue {
   user: AppUser;
+  applyAvatar: (avatar: string) => void;
   openMediaModal: (opts?: OpenMediaOptions) => void;
   openAvatarModal: () => void;
   openPasswordModal: () => void;

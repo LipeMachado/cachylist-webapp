@@ -86,10 +86,12 @@ export async function updateAvatar(formData: FormData): Promise<void> {
   const avatar = String(formData.get("avatar") ?? "");
   if (AVATAR_OPTIONS.includes(avatar)) {
     await prisma.user.update({ where: { id: user.id }, data: { avatar } });
+    // Refresh the server-rendered pages that show the avatar, but don't redirect:
+    // the client already updated optimistically, so we just persist in the background.
     revalidatePath(`/app/users/${user.id}`);
     revalidatePath("/app");
+    revalidatePath("/app", "layout");
   }
-  redirect(`/app/users/${user.id}`);
 }
 
 export async function deleteAccount(): Promise<void> {

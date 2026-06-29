@@ -22,7 +22,7 @@ export default function AppMotion() {
         element.textContent = hasPercent ? "0%" : "0";
         gsap.to(state, {
           value: target,
-          duration: 0.9,
+          duration: 0.6,
           ease: "power2.out",
           onUpdate: () => {
             const v = Math.round(state.value);
@@ -38,8 +38,11 @@ export default function AppMotion() {
           opacity: 1,
           y: 0,
           scale: 1,
-          duration: 0.38,
-          stagger: 0.025,
+          duration: 0.32,
+          // Spread the whole reveal over a fixed window instead of a per-card
+          // delay — otherwise a large board (100s of items) would trickle in
+          // over several seconds and read as "still loading".
+          stagger: { amount: 0.4 },
           ease: "power3.out",
           clearProps: "opacity,y,scale",
         }

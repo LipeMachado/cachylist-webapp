@@ -71,7 +71,10 @@ export default function SpatialTransition({ children }: { children: React.ReactN
       key={pathname}
       initial={initial}
       animate={{ opacity: 1, x: 0, y: 0 }}
-      transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+      // The spatial slide eases out over 0.26s, but opacity snaps to full almost
+      // immediately — so when the route's data resolves mid-transition the content
+      // reads as instantly "there" instead of fading in (which looked like loading).
+      transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1], opacity: { duration: 0.1 } }}
       style={{ minHeight: "100%" }}
     >
       {children}
