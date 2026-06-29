@@ -5,9 +5,7 @@ import Link from "next/link";
 import { Trash2 } from "lucide-react";
 import {
   analyzeImport,
-  loadImportPage,
   confirmImport,
-  type ImportPreviewResult,
 } from "@/lib/actions/import";
 import { CATEGORY_KEYS, categoryLabel, FALLBACK_COVER } from "@/lib/media";
 
@@ -21,6 +19,7 @@ interface Card {
   release_year: string;
   platform: string;
   anilist_id: number | null;
+  identifying: boolean;
 }
 
 interface SearchResult {
@@ -32,6 +31,13 @@ interface SearchResult {
 }
 
 const LIMIT = 50;
+// Space out the auto-identify requests so we stay friendly with the upstream
+// APIs' rate limits while covers fill in progressively, top to bottom.
+const IDENTIFY_GAP_MS = 250;
+
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 function searchPath(category: string): string | null {
   switch (category) {
@@ -64,17 +70,24 @@ function detailsUrl(category: string, id: number): string | null {
   }
 }
 
-function toCards(result: ImportPreviewResult): Card[] {
-  return (result.items ?? []).map((it, i) => ({
-    key: `${result.page}-${i}-${it.original_title}`,
-    original_title: it.original_title,
-    title: it.title,
-    category: it.category,
-    cover_url: it.cover_url ?? "",
-    description: it.description ?? "",
-    release_year: it.release_year != null ? String(it.release_year) : "",
-    platform: it.platform ?? "",
-    anilist_id: it.anilist_id,
+function yearFrom(result: SearchResult): string {
+  if (result.year != null) return String(result.year);
+  if (result.release_date) return result.release_date.split("-")[0];
+  return "";
+}
+
+function titlesToCards(titles: string[]): Card[] {
+  return titles.map((t, i) => ({
+    key: `${i}-${t}`,
+    original_title: t,
+    title: t,
+    category: "anime",
+    cover_url: "",
+    description: "",
+    release_year: "",
+    platform: "",
+    anilist_id: null,
+    identifying: false,
   }));
 }
 
@@ -82,12 +95,95 @@ export default function ImportTool() {
   const [phase, setPhase] = useState<"upload" | "preview" | "done">("upload");
   const [error, setError] = useState<string | null>(null);
   const [cards, setCards] = useState<Card[]>([]);
-  const [token, setToken] = useState<string | undefined>();
   const [page, setPage] = useState(0);
-  const [total, setTotal] = useState(0);
   const [count, setCount] = useState(0);
   const [pending, startTransition] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // The auto-identify queue reads the freshest cards via this ref (so updating a
+  // card mid-run doesn't restart the queue), and `identified` dedupes work so a
+  // card is only ever searched once. `gen` cancels the queue on page changes.
+  const cardsRef = useRef<Card[]>(cards);
+  const identified = useRef<Set<string>>(new Set());
+  const gen = useRef(0);
+
+  // Keep the queue's view of the cards fresh without restarting it. Declared
+  // before the identify effect so the ref is synced before the queue reads it.
+  useEffect(() => {
+    cardsRef.current = cards;
+  });
+
+  const total = cards.length;
+  const start = page * LIMIT;
+  const visible = cards.slice(start, start + LIMIT);
+  const stillIdentifying = visible.some((c) => c.identifying);
+
+  function updateCard(key: string, patch: Partial<Card>) {
+    setCards((cs) => cs.map((c) => (c.key === key ? { ...c, ...patch } : c)));
+  }
+
+  function removeCard(key: string) {
+    identified.current.add(key);
+    setCards((cs) => cs.filter((c) => c.key !== key));
+  }
+
+  async function identifyCard(card: Card) {
+    const path = searchPath(card.category);
+    if (!path) {
+      updateCard(card.key, { identifying: false });
+      return;
+    }
+    try {
+      const res = await fetch(`${path}?query=${encodeURIComponent(card.title.trim())}`);
+      const data: SearchResult[] = await res.json();
+      const best = Array.isArray(data) ? data[0] : undefined;
+      if (best) {
+        updateCard(card.key, {
+          title: best.title || card.title,
+          cover_url: best.poster || card.cover_url,
+          release_year: yearFrom(best) || card.release_year,
+          anilist_id: best.id ?? card.anilist_id,
+          identifying: false,
+        });
+      } else {
+        updateCard(card.key, { identifying: false });
+      }
+    } catch {
+      updateCard(card.key, { identifying: false });
+    }
+  }
+
+  // Auto-identify the visible page, one request at a time with a small gap.
+  // Bounded to what's on screen, cancelled when the page changes.
+  useEffect(() => {
+    if (phase !== "preview") return;
+    const my = ++gen.current;
+    const queue = cardsRef.current
+      .slice(page * LIMIT, page * LIMIT + LIMIT)
+      .filter((c) => !identified.current.has(c.key) && !!searchPath(c.category));
+    if (queue.length === 0) return;
+
+    queue.forEach((c) => identified.current.add(c.key));
+    setCards((cs) =>
+      cs.map((c) => (queue.some((q) => q.key === c.key) ? { ...c, identifying: true } : c))
+    );
+
+    (async () => {
+      for (const card of queue) {
+        if (gen.current !== my) break;
+        await identifyCard(card);
+        if (gen.current !== my) break;
+        await sleep(IDENTIFY_GAP_MS);
+      }
+    })();
+
+    // Bumping the shared gen cancels the in-flight loop above on page change.
+    return () => {
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      gen.current++;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, phase]);
 
   function handleAnalyze(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -100,25 +196,10 @@ export default function ImportTool() {
         setError(result.error ?? "Erro ao analisar.");
         return;
       }
-      setToken(result.token);
-      setTotal(result.total ?? 0);
-      setPage(result.page ?? 0);
-      setCards(toCards(result));
+      identified.current = new Set();
+      setCards(titlesToCards(result.titles ?? []));
+      setPage(0);
       setPhase("preview");
-    });
-  }
-
-  function goToPage(next: number) {
-    if (!token) return;
-    startTransition(async () => {
-      const result = await loadImportPage(token, next);
-      if (!result.ok) {
-        setError(result.error ?? "Erro ao carregar página.");
-        return;
-      }
-      setPage(result.page ?? next);
-      setTotal(result.total ?? total);
-      setCards(toCards(result));
     });
   }
 
@@ -133,27 +214,19 @@ export default function ImportTool() {
         release_year: c.release_year,
         platform: c.platform,
       }));
-      const result = await confirmImport(payload, token);
+      const result = await confirmImport(payload);
       setCount(result.count);
       setPhase("done");
     });
   }
 
-  function updateCard(key: string, patch: Partial<Card>) {
-    setCards((cs) => cs.map((c) => (c.key === key ? { ...c, ...patch } : c)));
-  }
-
-  function removeCard(key: string) {
-    setCards((cs) => cs.filter((c) => c.key !== key));
-  }
-
   return (
-    <div className={pending ? "is-importing" : ""}>
+    <div className={`min-h-full bg-[var(--bg)] ${pending ? "is-importing" : ""}`}>
       <div className="px-10 py-10 border-b border-[var(--line)]">
         <h1 className="text-xl font-extrabold tracking-[-.03em] m-0">Importar Lista</h1>
         <p className="mt-3 text-sm leading-[1.7] text-[var(--muted)]">
           Faça upload de um arquivo .txt (um título por linha) ou .csv (com coluna <strong>title</strong>) para importar
-          vários itens de uma vez. Você pode pesquisar dados nas APIs de anime, filmes, séries e jogos ao digitar o título.
+          vários itens de uma vez. As capas e dados são buscados automaticamente, aos poucos, conforme você revisa a lista.
         </p>
       </div>
 
@@ -199,10 +272,11 @@ export default function ImportTool() {
             <p className="text-xs text-[var(--tertiary)]">
               {total} {total === 1 ? "título encontrado" : "títulos encontrados"}
               {total > LIMIT ? ` (página ${page + 1})` : ""}. Revise os dados abaixo e ajuste títulos e categorias antes de importar.
+              {stillIdentifying ? " Buscando capas…" : ""}
             </p>
           </div>
           <div className="divide-y divide-[var(--line)] border-b border-[var(--line)]">
-            {cards.map((card) => (
+            {visible.map((card) => (
               <ImportCardRow key={card.key} card={card} onChange={(p) => updateCard(card.key, p)} onRemove={() => removeCard(card.key)} />
             ))}
           </div>
@@ -213,15 +287,15 @@ export default function ImportTool() {
               disabled={pending || cards.length === 0}
               className="inline-flex items-center justify-center w-fit min-h-[48px] px-6 bg-[var(--accent)] text-white text-[11px] font-bold tracking-[.14em] uppercase whitespace-nowrap cursor-pointer border-none transition-[background,color,border-color] duration-150 hover:brightness-110 disabled:opacity-60"
             >
-              Importar {cards.length} {cards.length === 1 ? "item" : "itens"} →
+              {pending ? "Importando…" : `Importar ${cards.length} ${cards.length === 1 ? "item" : "itens"} →`}
             </button>
             {page > 0 && (
-              <button type="button" onClick={() => goToPage(page - 1)} className="inline-flex items-center justify-center w-fit min-h-[48px] px-5 border border-[var(--line)] bg-transparent text-[var(--muted)] text-[11px] font-bold tracking-[.14em] uppercase whitespace-nowrap cursor-pointer transition-[background,color,border-color] duration-150 hover:text-[var(--text)] hover:border-[var(--accent)]">
+              <button type="button" onClick={() => setPage((p) => Math.max(0, p - 1))} className="inline-flex items-center justify-center w-fit min-h-[48px] px-5 border border-[var(--line)] bg-transparent text-[var(--muted)] text-[11px] font-bold tracking-[.14em] uppercase whitespace-nowrap cursor-pointer transition-[background,color,border-color] duration-150 hover:text-[var(--text)] hover:border-[var(--accent)]">
                 ← Página anterior
               </button>
             )}
             {total > (page + 1) * LIMIT && (
-              <button type="button" onClick={() => goToPage(page + 1)} className="inline-flex items-center justify-center w-fit min-h-[48px] px-5 border border-[var(--line)] bg-transparent text-[var(--muted)] text-[11px] font-bold tracking-[.14em] uppercase whitespace-nowrap cursor-pointer transition-[background,color,border-color] duration-150 hover:text-[var(--text)] hover:border-[var(--accent)]">
+              <button type="button" onClick={() => setPage((p) => p + 1)} className="inline-flex items-center justify-center w-fit min-h-[48px] px-5 border border-[var(--line)] bg-transparent text-[var(--muted)] text-[11px] font-bold tracking-[.14em] uppercase whitespace-nowrap cursor-pointer transition-[background,color,border-color] duration-150 hover:text-[var(--text)] hover:border-[var(--accent)]">
                 Próxima página →
               </button>
             )}
@@ -258,29 +332,6 @@ function ImportCardRow({
   const [results, setResults] = useState<SearchResult[]>([]);
   const [open, setOpen] = useState(false);
   const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const enriched = useRef(false);
-
-  // Lazy enrichment via AniList id (cover/description) for identified anime titles.
-  useEffect(() => {
-    if (enriched.current) return;
-    if (!card.anilist_id) return;
-    if (card.cover_url && !card.cover_url.includes("unsplash")) return;
-    enriched.current = true;
-    (async () => {
-      try {
-        const res = await fetch(`/app/anilist/details?id=${card.anilist_id}`);
-        const d = await res.json();
-        onChange({
-          cover_url: d.poster_url || card.cover_url,
-          description: d.overview || card.description,
-          release_year: d.release_year != null ? String(d.release_year) : card.release_year,
-        });
-      } catch {
-        // ignore
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   async function runSearch(title: string, category: string) {
     if (timeout.current) clearTimeout(timeout.current);
@@ -328,17 +379,23 @@ function ImportCardRow({
     }
   }
 
+  const showSkeleton = card.identifying && !card.cover_url;
+
   return (
     <div className="flex gap-4 px-10 py-5 items-start hover:bg-[var(--hover-bg)] transition-colors">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={card.cover_url || FALLBACK_COVER}
-        alt=""
-        className="w-[68px] h-[96px] object-cover flex-[0_0_68px] border border-[var(--line-soft)]"
-        onError={(e) => {
-          (e.target as HTMLImageElement).src = FALLBACK_COVER;
-        }}
-      />
+      {showSkeleton ? (
+        <div className="skeleton w-[68px] h-[96px] flex-[0_0_68px] border border-[var(--line-soft)]" aria-label="Buscando capa" />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={card.cover_url || FALLBACK_COVER}
+          alt=""
+          className="w-[68px] h-[96px] object-cover flex-[0_0_68px] border border-[var(--line-soft)]"
+          onError={(e) => {
+            (e.target as HTMLImageElement).src = FALLBACK_COVER;
+          }}
+        />
+      )}
       <div className="flex-1 min-w-0 grid grid-cols-[1fr_200px_auto] gap-x-4 gap-y-3">
         <div className="relative">
           <label className="grid gap-1 text-[10px] font-semibold tracking-[.12em] uppercase text-[var(--muted)]">

@@ -1,28 +1,8 @@
-// Import service — ports ImportService (CSV/text parsing, AniList identification,
-// item creation). Pagination state is kept in an in-memory store keyed by a token
-// (replaces Rails' tmp-file + session approach).
-import { anilistSearch } from "@/lib/services/anilist";
+// Import service — CSV/text parsing and item creation.
+// Title identification (AniList/TMDB/Steam) is done lazily on the client, per
+// visible card, so analyze stays instant and never blocks on rate-limited APIs.
 import { prisma } from "@/lib/prisma";
 import { CATEGORY_TO_INT, STATUS_TO_INT, type CategoryKey } from "@/lib/media";
-
-export const PREVIEW_LIMIT = 50;
-const REQUEST_DELAY_MS = 700;
-
-export interface EnrichedTitle {
-  original_title: string;
-  title: string;
-  category: CategoryKey;
-  cover_url: string | null;
-  description: string | null;
-  release_year: number | null;
-  platform: string | null;
-  source: string | null;
-  anilist_id: number | null;
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 /* ── Parsing ─────────────────────────────────────────────────────────────── */
 
@@ -78,48 +58,6 @@ function splitCsvLine(line: string): string[] {
   return result;
 }
 
-/* ── Identification (AniList) ────────────────────────────────────────────── */
-
-export async function identifyTitles(titles: string[]): Promise<EnrichedTitle[]> {
-  const results: EnrichedTitle[] = [];
-  for (let i = 0; i < titles.length; i++) {
-    results.push(await identifyAnilist(titles[i]));
-    if (i < titles.length - 1) await sleep(REQUEST_DELAY_MS);
-  }
-  return results;
-}
-
-async function identifyAnilist(title: string): Promise<EnrichedTitle> {
-  const base: EnrichedTitle = {
-    original_title: title,
-    title,
-    category: "anime",
-    cover_url: null,
-    description: null,
-    release_year: null,
-    platform: null,
-    source: null,
-    anilist_id: null,
-  };
-  try {
-    const results = await anilistSearch(title);
-    if (results.length) {
-      const best = results[0];
-      return {
-        ...base,
-        title: best.title,
-        category: best.format === "MOVIE" ? "anime_movie" : "anime",
-        source: "anilist",
-        anilist_id: best.id,
-      };
-    }
-    return base;
-  } catch (e) {
-    console.error(`ImportService AniList identify error for ${title}:`, (e as Error).message);
-    return base;
-  }
-}
-
 /* ── Creation ────────────────────────────────────────────────────────────── */
 
 export interface ImportItemInput {
@@ -137,6 +75,11 @@ export async function createItems(
   userId: number
 ): Promise<number> {
   let created = 0;
+
+  // Compute the next sortOrder per status once, then increment locally — avoids
+  // an aggregate query per item (which made large imports crawl).
+  const maxByStatus = new Map<number, number>();
+
   for (const data of items) {
     const title = data.title?.trim();
     if (!title) continue;
@@ -149,12 +92,17 @@ export async function createItems(
       ? Number(data.release_year)
       : null;
 
-    try {
-      const maxSort = await prisma.mediaItem.aggregate({
+    if (!maxByStatus.has(statusInt)) {
+      const agg = await prisma.mediaItem.aggregate({
         where: { userId, status: statusInt },
         _max: { sortOrder: true },
       });
+      maxByStatus.set(statusInt, agg._max.sortOrder ?? 0);
+    }
+    const nextSort = maxByStatus.get(statusInt)! + 1;
+    maxByStatus.set(statusInt, nextSort);
 
+    try {
       await prisma.mediaItem.create({
         data: {
           userId,
@@ -165,7 +113,7 @@ export async function createItems(
           description: data.description?.trim() || null,
           releaseYear: Number.isFinite(releaseYear) ? releaseYear : null,
           platform: data.platform?.trim() || null,
-          sortOrder: (maxSort._max.sortOrder ?? 0) + 1,
+          sortOrder: nextSort,
         },
       });
       created++;
@@ -174,30 +122,4 @@ export async function createItems(
     }
   }
   return created;
-}
-
-/* ── In-memory pagination store ──────────────────────────────────────────── */
-
-interface StoreEntry {
-  items: EnrichedTitle[];
-  expiresAt: number;
-}
-const previewStore = new Map<string, StoreEntry>();
-const STORE_TTL = 60 * 60 * 1000; // 1h
-
-export function storePreview(token: string, items: EnrichedTitle[]): void {
-  previewStore.set(token, { items, expiresAt: Date.now() + STORE_TTL });
-}
-
-export function readPreview(token: string): EnrichedTitle[] | null {
-  const entry = previewStore.get(token);
-  if (!entry || Date.now() > entry.expiresAt) {
-    previewStore.delete(token);
-    return null;
-  }
-  return entry.items;
-}
-
-export function deletePreview(token: string): void {
-  previewStore.delete(token);
 }
