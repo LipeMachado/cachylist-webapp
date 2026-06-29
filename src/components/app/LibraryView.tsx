@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { Plus, LayoutGrid, Columns3 } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import {
@@ -9,11 +9,14 @@ import {
   CATEGORY_TO_INT,
   statusLabel,
   statusClass,
+  statusKey,
   categoryLabel,
+  coverFor,
   toCardData,
   type CategoryKey,
   type StatusKey,
 } from "@/lib/media";
+import type { MediaItem } from "@prisma/client";
 import Kanban from "@/components/app/Kanban";
 import MediaCard from "@/components/app/MediaCard";
 import SearchDropdownInput from "@/components/app/SearchDropdownInput";
@@ -25,6 +28,8 @@ export interface LibrarySearchParams {
   category?: string;
   status?: string;
   platform?: string;
+  sort?: string;
+  view?: string;
 }
 
 function normalize(value: string): string {
@@ -35,6 +40,42 @@ function pluralize(word: string): string {
   if (/s$/i.test(word)) return word;
   return `${word}s`;
 }
+
+// Build a URL from the current params plus overrides; empty/undefined drops a key.
+function hrefWith(
+  basePath: string,
+  sp: LibrarySearchParams,
+  overrides: Partial<LibrarySearchParams>
+): string {
+  const merged: Record<string, string | undefined> = { ...sp, ...overrides };
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(merged)) {
+    if (v) qs.set(k, String(v));
+  }
+  const s = qs.toString();
+  return s ? `${basePath}?${s}` : basePath;
+}
+
+function sortItems(items: MediaItem[], sort?: string): MediaItem[] {
+  const arr = [...items];
+  switch (sort) {
+    case "title":
+      return arr.sort((a, b) => a.title.localeCompare(b.title));
+    case "year":
+      return arr.sort((a, b) => (b.releaseYear ?? -Infinity) - (a.releaseYear ?? -Infinity));
+    case "recent":
+      return arr.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+    default:
+      return arr; // keep the manual board order (sortOrder asc)
+  }
+}
+
+const SORTS: { key: string; label: string }[] = [
+  { key: "", label: "Ordem manual" },
+  { key: "recent", label: "Recentes" },
+  { key: "title", label: "Título A–Z" },
+  { key: "year", label: "Ano (novo→antigo)" },
+];
 
 export default async function LibraryView({
   selectedCategory,
@@ -52,6 +93,8 @@ export default async function LibraryView({
     orderBy: [{ sortOrder: "asc" }, { updatedAt: "desc" }, { createdAt: "desc" }],
   });
 
+  const isBoard = searchParams.view === "board";
+
   // category filter: route slug takes precedence, else the dropdown param
   const filterCategory =
     selectedCategory ??
@@ -59,18 +102,31 @@ export default async function LibraryView({
       ? (searchParams.category as CategoryKey)
       : null);
 
-  let items = allItems;
-  if (filterCategory) items = items.filter((i) => i.category === CATEGORY_TO_INT[filterCategory]);
-  if (searchParams.status && searchParams.status in STATUS_TO_INT)
-    items = items.filter((i) => i.status === STATUS_TO_INT[searchParams.status as StatusKey]);
-  if (searchParams.platform)
-    items = items.filter((i) => i.platform === searchParams.platform);
+  // `base` = everything filtered EXCEPT status (so the status tabs can show counts
+  // and the board can populate every column).
+  let base = allItems;
+  if (filterCategory) base = base.filter((i) => i.category === CATEGORY_TO_INT[filterCategory]);
+  if (searchParams.platform) base = base.filter((i) => i.platform === searchParams.platform);
   if (searchParams.query) {
     const q = normalize(searchParams.query);
-    items = items.filter((i) =>
+    base = base.filter((i) =>
       normalize([i.title, i.platform, i.author, i.releaseYear].filter(Boolean).join(" ")).includes(q)
     );
   }
+
+  const activeStatus =
+    searchParams.status && searchParams.status in STATUS_TO_INT
+      ? (searchParams.status as StatusKey)
+      : null;
+
+  // Grid items: also filtered by the active status tab, then sorted.
+  const gridItems = sortItems(
+    activeStatus ? base.filter((i) => i.status === STATUS_TO_INT[activeStatus]) : base,
+    searchParams.sort
+  );
+
+  const countFor = (status: StatusKey) =>
+    base.filter((i) => i.status === STATUS_TO_INT[status]).length;
 
   const platforms = Array.from(
     new Set(allItems.map((i) => i.platform).filter((p): p is string => !!p && p.trim().length > 0))
@@ -84,16 +140,21 @@ export default async function LibraryView({
 
   const itemsByStatus = LIBRARY_STATUSES.map((status) => ({
     status,
-    items: items.filter((i) => i.status === STATUS_TO_INT[status]),
+    items: base.filter((i) => i.status === STATUS_TO_INT[status]),
   }));
 
   const title = selectedCategory ? pluralize(categoryLabel(selectedCategory)) : "Biblioteca";
   const hasFilters = Boolean(
-    searchParams.query || searchParams.category || searchParams.status || searchParams.platform
+    searchParams.query || searchParams.category || searchParams.status || searchParams.platform || searchParams.sort
   );
 
   const selectCls =
     "min-h-[58px] border-0 bg-[var(--panel-bg)] text-[var(--text)] px-5 outline-none text-sm w-full font-inherit appearance-none border-r border-[var(--line)] hover:bg-[var(--hover-bg)] focus:bg-[var(--hover-bg)] focus:shadow-[inset_0_-2px_0_var(--accent)]";
+
+  const tabBase =
+    "inline-flex items-center gap-2 px-4 min-h-[44px] text-[11px] font-bold tracking-[.12em] uppercase whitespace-nowrap border-r border-[var(--line)] transition-[background,color] duration-150";
+  const tabOn = "bg-[var(--hover-bg)] text-[var(--text)] shadow-[inset_0_-2px_0_var(--accent)]";
+  const tabOff = "bg-transparent text-[var(--muted)] hover:bg-[var(--hover-bg)] hover:text-[var(--text)]";
 
   return (
     <>
@@ -103,7 +164,6 @@ export default async function LibraryView({
           {title}
         </Link>
         <Link href="#library-search" className="mobile-icon-button" aria-label="Buscar">
-          {/* search icon */}
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
         </Link>
       </header>
@@ -113,7 +173,7 @@ export default async function LibraryView({
           <p className="brutalist-kicker mb-5">Acervo filtrável</p>
           <h1 className="text-[clamp(42px,5vw,76px)] leading-[.92] m-0 font-black uppercase tracking-[-.08em]">{title}</h1>
           <p className="mt-5 text-sm leading-6 text-[var(--muted)] tracking-[.01em] max-w-[620px]">
-            Pesquise, filtre e mova seus itens entre status. Tudo em grade dura, bordas expostas e zero decoração desnecessária.
+            Pesquise, filtre e organize seu acervo. Grade de capas pra varrer rápido, ou modo quadro pra arrastar entre status.
           </p>
         </div>
         <div className="flex items-center pr-10">
@@ -127,7 +187,10 @@ export default async function LibraryView({
       </div>
 
       <section className="bg-transparent p-0">
-        <form method="get" action={basePath} className="library-filters grid grid-cols-[minmax(260px,1.4fr)_repeat(3,minmax(180px,.8fr))_auto] border-b border-[var(--line)] bg-[var(--panel-bg)]">
+        <form method="get" action={basePath} className="library-filters grid grid-cols-[minmax(260px,1.4fr)_repeat(3,minmax(160px,.8fr))_auto] border-b border-[var(--line)] bg-[var(--panel-bg)]">
+          {/* preserve the current view/status across a filter submit */}
+          {searchParams.view && <input type="hidden" name="view" value={searchParams.view} />}
+          {!isBoard && searchParams.status && <input type="hidden" name="status" value={searchParams.status} />}
           <div className="border-r border-[var(--line)]">
             <SearchDropdownInput
               id="library-search"
@@ -138,7 +201,7 @@ export default async function LibraryView({
               className="min-h-[58px] border-0 bg-transparent text-[var(--text)] px-5 outline-none text-sm w-full font-inherit placeholder:text-[var(--tertiary)] placeholder:text-[13px] hover:bg-[var(--hover-bg)] focus:bg-[var(--hover-bg)]"
             />
           </div>
-          {!selectedCategory && (
+          {!selectedCategory ? (
             <select name="category" defaultValue={searchParams.category ?? ""} className={selectCls}>
               <option value="">Todas as categorias</option>
               {CATEGORY_KEYS.map((key) => (
@@ -147,15 +210,9 @@ export default async function LibraryView({
                 </option>
               ))}
             </select>
+          ) : (
+            <span className="border-r border-[var(--line)]" />
           )}
-          <select name="status" defaultValue={searchParams.status ?? ""} className={selectCls}>
-            <option value="">Todos os status</option>
-            {LIBRARY_STATUSES.map((key) => (
-              <option key={key} value={key}>
-                {statusLabel(key)}
-              </option>
-            ))}
-          </select>
           <select name="platform" defaultValue={searchParams.platform ?? ""} className={selectCls}>
             <option value="">Todas as plataformas</option>
             {platforms.map((p) => (
@@ -164,10 +221,17 @@ export default async function LibraryView({
               </option>
             ))}
           </select>
+          <select name="sort" defaultValue={searchParams.sort ?? ""} className={selectCls} aria-label="Ordenar">
+            {SORTS.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
           <div className="flex justify-end border-l border-[var(--line)]">
             {hasFilters && (
               <Link
-                href={basePath}
+                href={hrefWith(basePath, {}, { view: searchParams.view })}
                 className="brutalist-link inline-flex items-center justify-center min-h-[58px] border-r border-[var(--line)] px-6 whitespace-nowrap cursor-pointer hover:bg-[var(--hover-bg)]"
               >
                 Limpar
@@ -182,7 +246,51 @@ export default async function LibraryView({
           </div>
         </form>
 
-        {items.length > 0 ? (
+        {/* status tabs (grid mode) + view toggle */}
+        <div className="flex items-stretch justify-between border-b border-[var(--line)] bg-[var(--panel-bg)] overflow-x-auto">
+          <div className="flex items-stretch">
+            {!isBoard && (
+              <>
+                <Link href={hrefWith(basePath, searchParams, { status: "" })} className={`${tabBase} ${!activeStatus ? tabOn : tabOff}`}>
+                  Todos <small className="text-[var(--tertiary)]">{base.length}</small>
+                </Link>
+                {LIBRARY_STATUSES.map((s) => (
+                  <Link
+                    key={s}
+                    href={hrefWith(basePath, searchParams, { status: s })}
+                    className={`${tabBase} ${activeStatus === s ? tabOn : tabOff}`}
+                  >
+                    <span className={`w-1.5 h-1.5 inline-block flex-[0_0_6px] ${statusClass(s)}`} />
+                    {statusLabel(s)} <small className="text-[var(--tertiary)]">{countFor(s)}</small>
+                  </Link>
+                ))}
+              </>
+            )}
+          </div>
+          <div className="flex items-stretch border-l border-[var(--line)]">
+            <Link
+              href={hrefWith(basePath, searchParams, { view: "" })}
+              aria-label="Visão em grade"
+              className={`inline-flex items-center gap-2 px-4 min-h-[44px] text-[11px] font-bold tracking-[.12em] uppercase ${!isBoard ? tabOn : tabOff}`}
+            >
+              <LayoutGrid size={15} /> Grade
+            </Link>
+            <Link
+              href={hrefWith(basePath, searchParams, { view: "board", status: "" })}
+              aria-label="Visão em quadro"
+              className={`inline-flex items-center gap-2 px-4 min-h-[44px] border-l border-[var(--line)] text-[11px] font-bold tracking-[.12em] uppercase ${isBoard ? tabOn : tabOff}`}
+            >
+              <Columns3 size={15} /> Quadro
+            </Link>
+          </div>
+        </div>
+
+        {base.length === 0 ? (
+          <EmptyState
+            title="Sua lista está vazia"
+            text="Adicione animes, séries, filmes, livros e jogos para começar."
+          />
+        ) : isBoard ? (
           <Kanban className="library-board flex overflow-x-auto border-b border-[var(--line)]">
             {itemsByStatus.map(({ status, items: colItems }) => (
               <div
@@ -203,11 +311,36 @@ export default async function LibraryView({
               </div>
             ))}
           </Kanban>
+        ) : gridItems.length === 0 ? (
+          <div className="px-10 py-20 text-center text-sm text-[var(--muted)]">
+            Nenhum item neste status.
+          </div>
         ) : (
-          <EmptyState
-            title="Sua lista está vazia"
-            text="Adicione animes, séries, filmes, livros e jogos para começar."
-          />
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(116px,1fr))] border-t border-l border-[var(--line)]">
+            {gridItems.map((item) => (
+              <Link
+                key={item.id}
+                href={`/app/media_items/${item.id}`}
+                className="group block bg-[var(--card-bg)] p-2.5 border-r border-b border-[var(--line)] hover:bg-[var(--hover-bg)] transition-colors"
+              >
+                <div className="aspect-[2/3] overflow-hidden border border-[var(--line-soft)] bg-[var(--surface-2)]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={coverFor(item)}
+                    alt={`Capa de ${item.title}`}
+                    loading="lazy"
+                    className="w-full h-full object-cover grayscale-[20%] group-hover:grayscale-0 transition duration-200"
+                  />
+                </div>
+                <div className="mt-2 flex items-start gap-1.5">
+                  <span className={`status-dot mt-[3px] flex-[0_0_auto] ${statusClass(statusKey(item.status))}`} />
+                  <strong className="text-[11px] font-bold leading-tight tracking-[.04em] uppercase line-clamp-2 text-[var(--text)]">
+                    {item.title}
+                  </strong>
+                </div>
+              </Link>
+            ))}
+          </div>
         )}
       </section>
     </>

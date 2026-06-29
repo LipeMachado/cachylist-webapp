@@ -7,6 +7,7 @@ import {
   analyzeImport,
   confirmImport,
 } from "@/lib/actions/import";
+import type { IdentifyResult } from "@/lib/services/identify";
 import { CATEGORY_KEYS, categoryLabel, FALLBACK_COVER } from "@/lib/media";
 
 interface Card {
@@ -20,6 +21,7 @@ interface Card {
   platform: string;
   anilist_id: number | null;
   identifying: boolean;
+  done: boolean;
 }
 
 interface SearchResult {
@@ -70,12 +72,6 @@ function detailsUrl(category: string, id: number): string | null {
   }
 }
 
-function yearFrom(result: SearchResult): string {
-  if (result.year != null) return String(result.year);
-  if (result.release_date) return result.release_date.split("-")[0];
-  return "";
-}
-
 function titlesToCards(titles: string[]): Card[] {
   return titles.map((t, i) => ({
     key: `${i}-${t}`,
@@ -88,6 +84,7 @@ function titlesToCards(titles: string[]): Card[] {
     platform: "",
     anilist_id: null,
     identifying: false,
+    done: false,
   }));
 }
 
@@ -100,12 +97,11 @@ export default function ImportTool() {
   const [pending, startTransition] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // The auto-identify queue reads the freshest cards via this ref (so updating a
-  // card mid-run doesn't restart the queue), and `identified` dedupes work so a
-  // card is only ever searched once. `gen` cancels the queue on page changes.
+  // The auto-identify queue reads the freshest cards via this ref. A card is
+  // verified exactly once: the `done` flag (in state, so it survives re-mounts /
+  // Fast Refresh) gates re-runs, and `inFlight` prevents concurrent duplicates.
   const cardsRef = useRef<Card[]>(cards);
-  const identified = useRef<Set<string>>(new Set());
-  const gen = useRef(0);
+  const inFlight = useRef<Set<string>>(new Set());
 
   // Keep the queue's view of the cards fresh without restarting it. Declared
   // before the identify effect so the ref is synced before the queue reads it.
@@ -123,64 +119,52 @@ export default function ImportTool() {
   }
 
   function removeCard(key: string) {
-    identified.current.add(key);
+    inFlight.current.delete(key);
     setCards((cs) => cs.filter((c) => c.key !== key));
   }
 
   async function identifyCard(card: Card) {
-    const path = searchPath(card.category);
-    if (!path) {
-      updateCard(card.key, { identifying: false });
-      return;
-    }
     try {
-      const res = await fetch(`${path}?query=${encodeURIComponent(card.title.trim())}`);
-      const data: SearchResult[] = await res.json();
-      const best = Array.isArray(data) ? data[0] : undefined;
-      if (best) {
+      const res = await fetch(`/app/identify?query=${encodeURIComponent(card.title.trim())}`);
+      const d: IdentifyResult | null = await res.json();
+      if (d && d.title) {
         updateCard(card.key, {
-          title: best.title || card.title,
-          cover_url: best.poster || card.cover_url,
-          release_year: yearFrom(best) || card.release_year,
-          anilist_id: best.id ?? card.anilist_id,
+          title: d.title || card.title,
+          category: d.category || card.category,
+          cover_url: d.poster || card.cover_url,
+          release_year: d.year != null ? String(d.year) : card.release_year,
+          anilist_id: d.source === "anilist" ? d.id : card.anilist_id,
           identifying: false,
+          done: true,
         });
       } else {
-        updateCard(card.key, { identifying: false });
+        updateCard(card.key, { identifying: false, done: true });
       }
     } catch {
-      updateCard(card.key, { identifying: false });
+      updateCard(card.key, { identifying: false, done: true });
     }
   }
 
-  // Auto-identify the visible page, one request at a time with a small gap.
-  // Bounded to what's on screen, cancelled when the page changes.
+  // Auto-identify the visible page once, one request at a time with a small gap.
+  // A card is verified a single time: `done` (in state) gates it permanently and
+  // `inFlight` blocks concurrent dupes, so re-mounts / Fast Refresh don't re-check.
   useEffect(() => {
     if (phase !== "preview") return;
-    const my = ++gen.current;
-    const queue = cardsRef.current
-      .slice(page * LIMIT, page * LIMIT + LIMIT)
-      .filter((c) => !identified.current.has(c.key) && !!searchPath(c.category));
-    if (queue.length === 0) return;
-
-    queue.forEach((c) => identified.current.add(c.key));
-    setCards((cs) =>
-      cs.map((c) => (queue.some((q) => q.key === c.key) ? { ...c, identifying: true } : c))
-    );
-
+    let cancelled = false;
     (async () => {
-      for (const card of queue) {
-        if (gen.current !== my) break;
+      for (const card of cardsRef.current.slice(page * LIMIT, page * LIMIT + LIMIT)) {
+        if (cancelled) break;
+        if (card.done || inFlight.current.has(card.key)) continue;
+        inFlight.current.add(card.key);
+        setCards((cs) => cs.map((c) => (c.key === card.key ? { ...c, identifying: true } : c)));
         await identifyCard(card);
-        if (gen.current !== my) break;
+        inFlight.current.delete(card.key);
+        if (cancelled) break;
         await sleep(IDENTIFY_GAP_MS);
       }
     })();
-
-    // Bumping the shared gen cancels the in-flight loop above on page change.
     return () => {
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      gen.current++;
+      cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, phase]);
@@ -196,7 +180,7 @@ export default function ImportTool() {
         setError(result.error ?? "Erro ao analisar.");
         return;
       }
-      identified.current = new Set();
+      inFlight.current = new Set();
       setCards(titlesToCards(result.titles ?? []));
       setPage(0);
       setPhase("preview");

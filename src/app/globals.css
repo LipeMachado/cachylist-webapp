@@ -496,7 +496,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   width: 28px;
   pointer-events: auto;
   overflow: hidden;
-  left: var(--bar-left, calc((var(--bar-index) + 1) * 100% / (var(--bar-count) + 1)));
+  /* Snap each bar onto the 9px gray grid behind it (.brutalist-noise::before):
+     round the evenly-distributed position to the nearest 9px line, then +0.5px
+     to land on the 1px line's centre. Otherwise % positions drift off the grid. */
+  left: var(--bar-left, calc(round((var(--bar-index) + 1) * 100% / (var(--bar-count) + 1), 9px) + 0.5px));
   transform: translateX(-50%);
 }
 

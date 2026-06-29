@@ -7,7 +7,13 @@ import Toaster from "./Toaster";
 import type { AppUser } from "./app-context";
 
 // Server wrapper for every authenticated page. Mirrors `render layout: "shared/app_shell"`.
-export default async function AppShell({ children }: { children: React.ReactNode }) {
+export default async function AppShell({
+  children,
+  modal,
+}: {
+  children: React.ReactNode;
+  modal?: React.ReactNode;
+}) {
   const user = await requireUser();
   const name = displayName(user);
 
@@ -29,6 +35,7 @@ export default async function AppShell({ children }: { children: React.ReactNode
         <Toaster />
       </Suspense>
       <AppChrome user={appUser}>{children}</AppChrome>
+      {modal}
     </div>
   );
 }

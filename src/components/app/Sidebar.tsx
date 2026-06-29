@@ -35,7 +35,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Filmes", path: "/app/library/movies", Icon: Film },
   { label: "Livros", path: "/app/library/books", Icon: BookOpen },
   { label: "Jogos", path: "/app/library/games", Icon: Gamepad2 },
-  { label: "Importar", path: "/app/media_items/import", Icon: Upload },
+  { label: "Importar", path: "/app/import", Icon: Upload },
 ];
 
 function normalize(path: string): string {

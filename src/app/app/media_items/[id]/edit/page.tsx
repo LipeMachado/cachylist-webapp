@@ -11,9 +11,12 @@ export default async function EditMediaPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const numId = Number(id);
+  if (!Number.isInteger(numId)) notFound();
+
   const user = await requireUser();
   const item = await prisma.mediaItem.findFirst({
-    where: { id: Number(id), userId: user.id },
+    where: { id: numId, userId: user.id },
   });
   if (!item) notFound();
 
@@ -35,8 +38,8 @@ export default async function EditMediaPage({
         mode="edit"
         id={item.id}
         initial={initial}
-        cancelHref={`/app/media_items/${item.id}`}
-        successHref={`/app/media_items/${item.id}?notice=${encodeURIComponent("Mídia atualizada com sucesso.")}`}
+        cancelHref="/app/library"
+        successHref={`/app/library?notice=${encodeURIComponent("Mídia atualizada com sucesso.")}`}
       />
     </>
   );

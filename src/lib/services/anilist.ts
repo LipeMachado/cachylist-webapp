@@ -10,6 +10,7 @@ const DETAILS_CACHE_VERSION = "v1";
 export interface AnilistSearchResult {
   id: number;
   title: string;
+  englishTitle: string | null;
   year: number | null;
   poster: string | null;
   format: string | null;
@@ -89,6 +90,7 @@ function formatSearch(media: AnilistMedia): AnilistSearchResult {
   return {
     id: media.id,
     title,
+    englishTitle: media.title?.english ?? null,
     year: media.startDate?.year ?? null,
     poster: media.coverImage?.large ?? null,
     format: media.format ?? null,
