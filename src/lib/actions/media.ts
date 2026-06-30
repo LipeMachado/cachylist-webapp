@@ -99,6 +99,14 @@ function buildData(formData: FormData): {
     platinumCompleted: bool(formData, "platinum_completed"),
   };
 
+  // Marking something "Concluído" should max out its progress so it reads as
+  // truly finished — fill current from the total whenever the total is known.
+  if (statusInt === STATUS_TO_INT.completed) {
+    if (data.totalEpisodes != null) data.currentEpisode = data.totalEpisodes;
+    if (data.totalSeasons != null) data.currentSeason = data.totalSeasons;
+    if (data.totalPages != null) data.currentPage = data.totalPages;
+  }
+
   return { data, errors, title, categoryInt, statusInt };
 }
 

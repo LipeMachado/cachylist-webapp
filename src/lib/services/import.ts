@@ -85,8 +85,8 @@ export async function createItems(
     if (!title) continue;
 
     const categoryKey = (data.category?.trim() || "anime") as CategoryKey;
-    const statusKey = (data.status?.trim() || "backlog") as keyof typeof STATUS_TO_INT;
-    const statusInt = STATUS_TO_INT[statusKey] ?? STATUS_TO_INT.backlog;
+    const statusKey = (data.status?.trim() || "planned") as keyof typeof STATUS_TO_INT;
+    const statusInt = STATUS_TO_INT[statusKey] ?? STATUS_TO_INT.planned;
 
     const releaseYear = data.release_year?.trim()
       ? Number(data.release_year)

@@ -12,13 +12,17 @@ export const CATEGORY_TO_INT = {
 } as const;
 
 export const STATUS_TO_INT = {
-  backlog: 5,
   planned: 0,
   in_progress: 1,
   completed: 2,
   paused: 3,
   no_date: 4,
 } as const;
+
+// Legacy "backlog" status (int 5): merged into "planned" / Para Depois. Items
+// still stored as 5 fall back to "planned" via statusKey() and normalize to 0
+// the next time they're saved or reordered.
+export const LEGACY_BACKLOG_INT = 5;
 
 export type CategoryKey = keyof typeof CATEGORY_TO_INT;
 export type StatusKey = keyof typeof STATUS_TO_INT;
@@ -45,7 +49,6 @@ export const STATUS_KEYS = Object.keys(STATUS_TO_INT) as StatusKey[];
 
 // Board columns used across the UI.
 export const LIBRARY_STATUSES: StatusKey[] = [
-  "backlog",
   "planned",
   "in_progress",
   "completed",
@@ -70,7 +73,6 @@ export const CATEGORY_LABELS: Record<CategoryKey, string> = {
 };
 
 export const STATUS_LABELS: Record<StatusKey, string> = {
-  backlog: "Backlog",
   planned: "Para Depois",
   in_progress: "Em Andamento",
   completed: "Concluído",
@@ -168,6 +170,8 @@ export function progressLabel(item: ProgressItem): string | null {
 }
 
 export function progressPercentage(item: ProgressItem): number {
+  // A finished item always reads as 100%, even if its total is unknown.
+  if (statusKey(item.status) === "completed") return 100;
   const cat = categoryKey(item.category);
   if (cat === "anime" || cat === "series") {
     if (!present(item.currentEpisode) || !item.totalEpisodes) return 0;

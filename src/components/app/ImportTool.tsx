@@ -192,7 +192,7 @@ export default function ImportTool() {
       const payload = cards.map((c) => ({
         title: c.title,
         category: c.category,
-        status: "backlog",
+        status: "planned",
         cover_url: c.cover_url,
         description: c.description,
         release_year: c.release_year,

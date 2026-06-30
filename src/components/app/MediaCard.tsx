@@ -2,7 +2,7 @@ import Link from "next/link";
 import { GripVertical } from "lucide-react";
 import { statusClass, type CardData } from "@/lib/media";
 
-// Presentational card. Drag behaviour is delegated by the Kanban client
+// Presentational card. Drag behaviour is delegated by the Board client
 // component via the data-kanban-* attributes. Mirrors shared/_media_card.
 export default function MediaCard({ item }: { item: CardData }) {
   const showBar = item.progressPercentage > 0 && !item.completed;

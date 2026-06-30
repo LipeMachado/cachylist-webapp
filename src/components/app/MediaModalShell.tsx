@@ -8,18 +8,18 @@ import { X } from "lucide-react";
 // page, and closing pops the history entry (router.back) so the URL the modal
 // was opened from is restored.
 export default function MediaModalShell({
-  id,
+  path,
   children,
 }: {
-  id: number;
+  path: string;
   children: React.ReactNode;
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  // Parallel-route slots keep their last active state on soft navigation, so
-  // navigating to e.g. /media_items/[id]/edit would otherwise leave the modal
-  // open on top of the edit page. Only render while the URL is the detail route.
-  const active = pathname === `/app/media_items/${id}`;
+  // Parallel-route slots keep their last active state on soft navigation, so a
+  // stale modal would otherwise linger over a different page. Only render while
+  // the URL is exactly the route this modal intercepts.
+  const active = pathname === path;
 
   useEffect(() => {
     if (!active) return;

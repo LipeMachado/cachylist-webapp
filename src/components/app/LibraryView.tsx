@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Plus, LayoutGrid, Columns3 } from "lucide-react";
+import { Plus } from "lucide-react";
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import {
@@ -17,11 +18,12 @@ import {
   type StatusKey,
 } from "@/lib/media";
 import type { MediaItem } from "@prisma/client";
-import Kanban from "@/components/app/Kanban";
+import Board from "@/components/app/Board";
 import MediaCard from "@/components/app/MediaCard";
 import SearchDropdownInput from "@/components/app/SearchDropdownInput";
-import { AddMediaButton, KanbanAddButton, MobileMenuButton } from "@/components/app/buttons";
+import { AddMediaButton, MobileMenuButton } from "@/components/app/buttons";
 import { EmptyState } from "@/components/app/buttons";
+import ViewToggle from "@/components/app/ViewToggle";
 
 export interface LibrarySearchParams {
   query?: string;
@@ -93,7 +95,9 @@ export default async function LibraryView({
     orderBy: [{ sortOrder: "asc" }, { updatedAt: "desc" }, { createdAt: "desc" }],
   });
 
-  const isBoard = searchParams.view === "board";
+  // View comes from the URL when set, else from the saved cookie preference.
+  const savedView = (await cookies()).get("cachy-view")?.value;
+  const isBoard = (searchParams.view ?? savedView) === "board";
 
   // category filter: route slug takes precedence, else the dropdown param
   const filterCategory =
@@ -119,14 +123,15 @@ export default async function LibraryView({
       ? (searchParams.status as StatusKey)
       : null;
 
-  // Grid items: also filtered by the active status tab, then sorted.
+  // Grid items: also filtered by the active status tab, then sorted. Group by
+  // statusKey() so legacy "backlog" (int 5) items fold into Para Depois.
   const gridItems = sortItems(
-    activeStatus ? base.filter((i) => i.status === STATUS_TO_INT[activeStatus]) : base,
+    activeStatus ? base.filter((i) => statusKey(i.status) === activeStatus) : base,
     searchParams.sort
   );
 
   const countFor = (status: StatusKey) =>
-    base.filter((i) => i.status === STATUS_TO_INT[status]).length;
+    base.filter((i) => statusKey(i.status) === status).length;
 
   const platforms = Array.from(
     new Set(allItems.map((i) => i.platform).filter((p): p is string => !!p && p.trim().length > 0))
@@ -140,7 +145,7 @@ export default async function LibraryView({
 
   const itemsByStatus = LIBRARY_STATUSES.map((status) => ({
     status,
-    items: base.filter((i) => i.status === STATUS_TO_INT[status]),
+    items: base.filter((i) => statusKey(i.status) === status),
   }));
 
   const title = selectedCategory ? pluralize(categoryLabel(selectedCategory)) : "Biblioteca";
@@ -267,22 +272,11 @@ export default async function LibraryView({
               </>
             )}
           </div>
-          <div className="flex items-stretch border-l border-[var(--line)]">
-            <Link
-              href={hrefWith(basePath, searchParams, { view: "" })}
-              aria-label="Visão em grade"
-              className={`inline-flex items-center gap-2 px-4 min-h-[44px] text-[11px] font-bold tracking-[.12em] uppercase ${!isBoard ? tabOn : tabOff}`}
-            >
-              <LayoutGrid size={15} /> Grade
-            </Link>
-            <Link
-              href={hrefWith(basePath, searchParams, { view: "board", status: "" })}
-              aria-label="Visão em quadro"
-              className={`inline-flex items-center gap-2 px-4 min-h-[44px] border-l border-[var(--line)] text-[11px] font-bold tracking-[.12em] uppercase ${isBoard ? tabOn : tabOff}`}
-            >
-              <Columns3 size={15} /> Quadro
-            </Link>
-          </div>
+          <ViewToggle
+            gridHref={hrefWith(basePath, searchParams, { view: "grid" })}
+            boardHref={hrefWith(basePath, searchParams, { view: "board", status: "" })}
+            isBoard={isBoard}
+          />
         </div>
 
         {base.length === 0 ? (
@@ -291,26 +285,18 @@ export default async function LibraryView({
             text="Adicione animes, séries, filmes, livros e jogos para começar."
           />
         ) : isBoard ? (
-          <Kanban className="library-board flex overflow-x-auto border-b border-[var(--line)]">
-            {itemsByStatus.map(({ status, items: colItems }) => (
-              <div
-                key={status}
-                className="kanban-column border-r border-[var(--line)] bg-[var(--column-bg)] [&:last-child]:border-r-0"
-                data-kanban-target="column"
-                data-kanban-status={status}
-              >
-                <header className="min-h-[60px] px-6 border-b border-[var(--line)] flex items-center gap-2 text-[10px] font-bold tracking-[.16em] uppercase text-[var(--muted)]">
-                  <span className={`w-1.5 h-1.5 bg-[var(--accent)] inline-block flex-[0_0_6px] ${statusClass(status)}`} />
-                  <strong className="font-bold text-[var(--muted)] truncate">{statusLabel(status)}</strong>
-                  <small className="ml-auto text-[var(--tertiary)] text-[11px] tracking-[.04em]">{colItems.length}</small>
-                  <KanbanAddButton status={status} category={selectedCategory ?? undefined} />
-                </header>
-                {colItems.map((item) => (
-                  <MediaCard key={item.id} item={toCardData(item)} />
-                ))}
-              </div>
-            ))}
-          </Kanban>
+          <Board
+            className="library-board flex overflow-x-auto border-b border-[var(--line)]"
+            columns={itemsByStatus.map(({ status, items }) => ({
+              status,
+              items: items.map((item) => ({
+                id: item.id,
+                node: <MediaCard key={item.id} item={toCardData(item)} />,
+              })),
+            }))}
+            category={selectedCategory ?? undefined}
+            addButton
+          />
         ) : gridItems.length === 0 ? (
           <div className="px-10 py-20 text-center text-sm text-[var(--muted)]">
             Nenhum item neste status.

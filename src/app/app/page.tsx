@@ -7,7 +7,6 @@ import { computeStats } from "@/lib/stats";
 import {
   DASHBOARD_STATUSES,
   STATUS_TO_INT,
-  statusLabel,
   statusClass,
   statusKey,
   categoryLabel,
@@ -18,9 +17,9 @@ import {
   displayName,
   toCardData,
 } from "@/lib/media";
-import Kanban from "@/components/app/Kanban";
+import Board from "@/components/app/Board";
 import MediaCard from "@/components/app/MediaCard";
-import { AddMediaButton, KanbanAddButton, MobileMenuButton, MobileSearchLink } from "@/components/app/buttons";
+import { AddMediaButton, MobileMenuButton, MobileSearchLink } from "@/components/app/buttons";
 import SearchDropdownInput from "@/components/app/SearchDropdownInput";
 import { AvatarMobileButton } from "@/components/app/profile-mobile";
 
@@ -31,6 +30,15 @@ const boardOrder: Prisma.MediaItemOrderByWithRelationInput[] = [
   { updatedAt: "desc" },
   { createdAt: "desc" },
 ];
+
+// Deterministic pseudo-random horizontal position (0–100%) per pulse bar, so the
+// bars scatter across the hero — some clustered, some adjacent — instead of being
+// evenly spaced. Stable across renders (no hydration mismatch); as the library
+// grows, higher indices fill in at new scattered spots.
+function barLeft(index: number): string {
+  const x = Math.sin((index + 1) * 12.9898) * 43758.5453;
+  return ((x - Math.floor(x)) * 100).toFixed(2);
+}
 
 export default async function DashboardPage() {
   const user = await requireUser();
@@ -56,7 +64,7 @@ export default async function DashboardPage() {
 
   const itemsByStatus = DASHBOARD_STATUSES.map((status) => ({
     status,
-    items: items.filter((i) => i.status === STATUS_TO_INT[status]),
+    items: items.filter((i) => statusKey(i.status) === status),
   }));
 
   const highlightedBars = stats.total > 0 ? Math.min(Math.ceil(stats.total / 5), 72) : 0;
@@ -178,7 +186,7 @@ export default async function DashboardPage() {
             {highlightedBars > 0 && (
               <div className="library-pulse-bars" aria-hidden="true">
                 {Array.from({ length: highlightedBars }).map((_, index) => (
-                  <span key={index} style={{ "--bar-index": index, "--bar-count": highlightedBars } as React.CSSProperties}>
+                  <span key={index} style={{ "--bar-left": `${barLeft(index)}%` } as React.CSSProperties}>
                     <i />
                   </span>
                 ))}
@@ -221,26 +229,17 @@ export default async function DashboardPage() {
               Ver tudo →
             </Link>
           </div>
-          <Kanban className="flex overflow-x-auto border-b border-[var(--line)] min-h-[420px]">
-            {itemsByStatus.map(({ status, items: colItems }) => (
-              <div
-                key={status}
-                className="kanban-column border-r border-[var(--line)] bg-[var(--column-bg)] [&:last-child]:border-r-0"
-                data-kanban-target="column"
-                data-kanban-status={status}
-              >
-                <header className="min-h-[60px] px-6 border-b border-[var(--line)] flex items-center gap-2 text-[10px] font-bold tracking-[.16em] uppercase text-[var(--muted)]">
-                  <span className={`w-1.5 h-1.5 bg-[var(--accent)] inline-block flex-[0_0_6px] ${statusClass(status)}`} />
-                  <strong className="font-bold text-[var(--muted)] truncate">{statusLabel(status)}</strong>
-                  <small className="ml-auto text-[var(--tertiary)] text-[11px] tracking-[.04em]">{stats.count(status)}</small>
-                  <KanbanAddButton status={status} />
-                </header>
-                {colItems.map((item) => (
-                  <MediaCard key={item.id} item={toCardData(item)} />
-                ))}
-              </div>
-            ))}
-          </Kanban>
+          <Board
+            className="flex overflow-x-auto border-b border-[var(--line)] min-h-[420px]"
+            columns={itemsByStatus.map(({ status, items }) => ({
+              status,
+              items: items.map((item) => ({
+                id: item.id,
+                node: <MediaCard key={item.id} item={toCardData(item)} />,
+              })),
+            }))}
+            addButton
+          />
         </section>
       </div>
     </>

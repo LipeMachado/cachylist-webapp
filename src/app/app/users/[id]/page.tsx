@@ -7,14 +7,13 @@ import { requireUser } from "@/lib/session";
 import { computeStats } from "@/lib/stats";
 import {
   DASHBOARD_STATUSES,
-  STATUS_TO_INT,
+  statusKey,
   statusLabel,
   statusClass,
   displayName,
   avatarPath,
   toCardData,
 } from "@/lib/media";
-import Kanban from "@/components/app/Kanban";
 import MediaCard from "@/components/app/MediaCard";
 import StatCard from "@/components/app/StatCard";
 import { MobileMenuButton } from "@/components/app/buttons";
@@ -51,7 +50,7 @@ export default async function UserProfilePage({
   );
   const itemsByStatus = DASHBOARD_STATUSES.map((status) => ({
     status,
-    items: boardItems.filter((i) => i.status === STATUS_TO_INT[status]),
+    items: boardItems.filter((i) => statusKey(i.status) === status),
   }));
 
   const memberSince = new Intl.DateTimeFormat("pt-BR", {
@@ -113,13 +112,11 @@ export default async function UserProfilePage({
             <h2 className="m-0 text-[11px] font-medium tracking-[.12em] uppercase text-[var(--muted)]">Mídias recentes</h2>
             <small>{stats.total} itens no total</small>
           </div>
-          <Kanban className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 overflow-hidden border-y border-[var(--line)] min-h-[420px]">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 overflow-hidden border-y border-[var(--line)] min-h-[420px]">
             {itemsByStatus.map(({ status, items }) => (
               <div
                 key={status}
                 className="min-w-0 border-r border-b xl:border-b-0 border-[var(--line)] bg-[var(--column-bg)] [&:last-child]:border-r-0"
-                data-kanban-target="column"
-                data-kanban-status={status}
               >
                 <header className="min-h-[60px] px-4 md:px-6 border-b border-[var(--line)] flex items-center gap-2 text-[11px] font-medium tracking-[.12em] uppercase text-[var(--muted)]">
                   <span className={`w-1.5 h-1.5 bg-[var(--accent)] inline-block flex-[0_0_6px] ${statusClass(status)}`} />
@@ -131,7 +128,7 @@ export default async function UserProfilePage({
                 ))}
               </div>
             ))}
-          </Kanban>
+          </div>
         </section>
       )}
     </>

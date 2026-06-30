@@ -6,7 +6,6 @@ import { avatarPath } from "@/lib/media";
 import { AppModalContext, type AppUser, type OpenMediaOptions } from "./app-context";
 import Sidebar from "./Sidebar";
 import MediaModal from "./MediaModal";
-import SpatialTransition from "./SpatialTransition";
 import {
   AvatarModal,
   PasswordModal,
@@ -113,9 +112,7 @@ export default function AppChrome({
           onClick={closeMobileMenu}
           hidden={!mobileOpen}
         />
-        <main className="app-main">
-          <SpatialTransition>{children}</SpatialTransition>
-        </main>
+        <main className="app-main">{children}</main>
       </div>
 
       {mediaOpen && <MediaModal options={mediaOptions} onClose={() => setMediaOpen(false)} />}

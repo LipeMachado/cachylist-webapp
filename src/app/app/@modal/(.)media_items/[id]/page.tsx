@@ -24,7 +24,7 @@ export default async function MediaModalInterceptPage({
   if (!item) return null;
 
   return (
-    <MediaModalShell id={item.id}>
+    <MediaModalShell path={`/app/media_items/${item.id}`}>
       <MediaDetailBody item={item} />
     </MediaModalShell>
   );
