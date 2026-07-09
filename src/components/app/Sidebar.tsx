@@ -79,6 +79,7 @@ export default function Sidebar({ onCollapse, onExpand, onMobileClose }: Props) 
             <Link
               key={path}
               href={path}
+              prefetch={false}
               className={`sidebar-rail-link ${normalize(path) === activePath ? "active" : ""}`}
               title={label}
               aria-label={label}

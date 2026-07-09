@@ -17,6 +17,18 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   reactCompiler: true,
   poweredByHeader: false,
+  experimental: {
+    // Next's default is 0s for dynamic routes (every page here is dynamic —
+    // it all reads the session). With no client cache, every navigation
+    // (even opening/closing a modal) re-fetches the *entire* tree from the
+    // server, including the shared layout (sidebar, nav), which re-triggers
+    // prefetch for every link in it. Mutations still show fresh data
+    // instantly because the server actions call revalidatePath(), which
+    // busts this cache regardless of staleTime.
+    staleTimes: {
+      dynamic: 30,
+    },
+  },
   images: {
     // Posters use a plain <img> (covers can come from any user-supplied URL), so
     // next/image only needs the local avatars + a few known hosts.

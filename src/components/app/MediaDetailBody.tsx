@@ -38,6 +38,7 @@ export default function MediaDetailBody({ item }: { item: MediaItem }) {
           <div className="flex flex-wrap gap-3 items-center justify-center md:justify-start mt-7">
             <Link
               href={`/app/media_items/${item.id}/edit`}
+              prefetch={false}
               className="inline-flex items-center justify-center w-fit min-h-[48px] px-5 bg-[var(--accent)] text-white text-[11px] font-semibold tracking-[.1em] uppercase whitespace-nowrap cursor-pointer border-none transition-[background,color,border-color] duration-150 hover:brightness-110"
             >
               Editar
