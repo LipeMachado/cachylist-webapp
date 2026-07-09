@@ -114,7 +114,7 @@ export default async function DashboardPage() {
             {continueItems.map((item) => {
               const progress = progressPercentage(item);
               return (
-                <Link key={item.id} href={`/app/media_items/${item.id}`} className="mobile-progress-card">
+                <Link key={item.id} href={`/app/media_items/${item.id}`} prefetch={false} className="mobile-progress-card">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={coverFor(item)} alt={`Capa de ${item.title}`} />
                   <div className="mobile-card-copy">
@@ -142,7 +142,7 @@ export default async function DashboardPage() {
           </div>
           <div className="mobile-latest-list">
             {latestItems.map((item) => (
-              <Link key={item.id} href={`/app/media_items/${item.id}`} className="mobile-latest-card">
+              <Link key={item.id} href={`/app/media_items/${item.id}`} prefetch={false} className="mobile-latest-card">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={coverFor(item)} alt={`Capa de ${item.title}`} />
                 <div className="mobile-card-copy">

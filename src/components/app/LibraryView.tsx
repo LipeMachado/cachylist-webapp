@@ -307,6 +307,7 @@ export default async function LibraryView({
               <Link
                 key={item.id}
                 href={`/app/media_items/${item.id}`}
+                prefetch={false}
                 className="group block bg-[var(--card-bg)] p-2.5 border-r border-b border-[var(--line)] hover:bg-[var(--hover-bg)] transition-colors"
               >
                 <div className="aspect-[2/3] overflow-hidden border border-[var(--line-soft)] bg-[var(--surface-2)]">

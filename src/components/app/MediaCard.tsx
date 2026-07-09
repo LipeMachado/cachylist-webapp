@@ -15,6 +15,7 @@ export default function MediaCard({ item }: { item: CardData }) {
     >
       <Link
         href={`/app/media_items/${item.id}`}
+        prefetch={false}
         className="flex items-start gap-3 p-4 no-underline text-inherit"
         data-kanban-link
       >
