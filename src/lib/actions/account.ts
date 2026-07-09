@@ -25,6 +25,7 @@ export async function updateAccount(
 
   const errors: string[] = [];
   if (!email) errors.push("E-mail é obrigatório");
+  else if (email.length > 255) errors.push("E-mail muito longo");
   else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) errors.push("E-mail inválido");
 
   if (username) {
@@ -71,8 +72,8 @@ export async function updatePassword(
 
   if (!(await bcrypt.compare(current, user.encryptedPassword)))
     return { error: "Senha atual incorreta." };
-  if (password.length < 6)
-    return { error: "Nova senha deve ter no mínimo 6 caracteres." };
+  if (password.length < 6 || password.length > 200)
+    return { error: "Nova senha deve ter entre 6 e 200 caracteres." };
   if (password !== confirmation)
     return { error: "A confirmação de senha não confere." };
 

@@ -8,7 +8,8 @@ export async function GET(req: Request) {
 
   const params = new URL(req.url).searchParams;
   const id = params.get("id");
-  const type = params.get("type") ?? "movie";
-  if (!id) return NextResponse.json({});
-  return NextResponse.json(await tmdbDetails(type, id));
+  const typeParam = params.get("type") ?? "movie";
+  if (!id || !/^\d+$/.test(id)) return NextResponse.json({});
+  if (typeParam !== "movie" && typeParam !== "tv") return NextResponse.json({});
+  return NextResponse.json(await tmdbDetails(typeParam, id));
 }

@@ -84,7 +84,10 @@ export default function MediaForm({
   const [results, setResults] = useState<SearchResult[]>([]);
   const [showResults, setShowResults] = useState(false);
   const [loadingSearch, setLoadingSearch] = useState(false);
+  const [selectingId, setSelectingId] = useState<number | null>(null);
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAbort = useRef<AbortController | null>(null);
+  const detailsAbort = useRef<AbortController | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const cat = values.category;
@@ -102,11 +105,16 @@ export default function MediaForm({
       }
     }
     window.addEventListener("click", onClick);
-    return () => window.removeEventListener("click", onClick);
+    return () => {
+      window.removeEventListener("click", onClick);
+      searchAbort.current?.abort();
+      detailsAbort.current?.abort();
+    };
   }, []);
 
   function runSearch(title: string, category: string) {
     if (searchTimeout.current) clearTimeout(searchTimeout.current);
+    searchAbort.current?.abort();
     const path = searchPath(category);
     if (!path || title.trim().length < 2) {
       setShowResults(false);
@@ -116,30 +124,44 @@ export default function MediaForm({
     setLoadingSearch(true);
     setShowResults(true);
     searchTimeout.current = setTimeout(async () => {
+      const controller = new AbortController();
+      searchAbort.current = controller;
       try {
-        const res = await fetch(`${path}?query=${encodeURIComponent(title.trim())}`);
+        const res = await fetch(`${path}?query=${encodeURIComponent(title.trim())}`, {
+          signal: controller.signal,
+        });
         const data = (await res.json()) as SearchResult[];
         setResults(Array.isArray(data) ? data : []);
         setShowResults(true);
-      } catch {
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return; // superseded by a newer search
         setResults([]);
         setShowResults(false);
       } finally {
-        setLoadingSearch(false);
+        if (searchAbort.current === controller) setLoadingSearch(false);
       }
     }, 350);
   }
 
   async function selectResult(result: SearchResult) {
-    setShowResults(false);
     const url = detailsUrl(cat, result.id);
-    if (!url) return;
+    if (!url) {
+      setShowResults(false);
+      return;
+    }
+    detailsAbort.current?.abort();
+    const controller = new AbortController();
+    detailsAbort.current = controller;
+    setSelectingId(result.id);
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
       const d = (await res.json()) as Record<string, unknown>;
       applyDetails(d);
-    } catch {
-      // ignore
+      setShowResults(false);
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return;
+    } finally {
+      if (detailsAbort.current === controller) setSelectingId(null);
     }
   }
 
@@ -285,7 +307,8 @@ export default function MediaForm({
                           key={r.id}
                           type="button"
                           onClick={() => selectResult(r)}
-                          className="flex items-center gap-3 px-4 py-3 text-left w-full hover:bg-[rgba(255,255,255,.06)] cursor-pointer border-0 bg-transparent text-[var(--text)] text-sm"
+                          disabled={selectingId !== null}
+                          className="flex items-center gap-3 px-4 py-3 text-left w-full hover:bg-[rgba(255,255,255,.06)] cursor-pointer border-0 bg-transparent text-[var(--text)] text-sm disabled:opacity-50 disabled:cursor-wait"
                         >
                           {r.poster ? (
                             // eslint-disable-next-line @next/next/no-img-element
@@ -299,6 +322,9 @@ export default function MediaForm({
                               <div className="text-[var(--muted)] text-xs">{r.year}</div>
                             ) : null}
                           </div>
+                          {selectingId === r.id && (
+                            <span className="text-[var(--muted)] text-xs shrink-0">Carregando…</span>
+                          )}
                         </button>
                       ))
                     )}
@@ -513,7 +539,13 @@ export default function MediaForm({
           disabled={pending}
           className="inline-flex items-center justify-center w-fit min-h-[48px] px-5 bg-[var(--accent)] text-white text-[11px] font-semibold tracking-[.1em] uppercase whitespace-nowrap cursor-pointer font-inherit border-none transition-[background,color,border-color] duration-150 hover:brightness-110 disabled:opacity-60"
         >
-          {mode === "edit" ? "Salvar alterações" : "Criar mídia"}
+          {pending
+            ? mode === "edit"
+              ? "Salvando…"
+              : "Criando…"
+            : mode === "edit"
+              ? "Salvar alterações"
+              : "Criar mídia"}
         </button>
       </div>
     </form>

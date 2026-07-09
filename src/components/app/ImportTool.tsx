@@ -236,7 +236,7 @@ export default function ImportTool() {
                 />
               </label>
               <p className="mt-2 text-xs text-[var(--tertiary)]">
-                Formatos aceitos: .txt (1 título por linha) ou .csv (colunas: title). Sem limite de itens.
+                Formatos aceitos: .txt (1 título por linha) ou .csv (colunas: title). Máximo 5000 itens, arquivo até 2MB.
               </p>
               <button
                 type="submit"
@@ -315,40 +315,62 @@ function ImportCardRow({
 }) {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [open, setOpen] = useState(false);
+  const [selectingId, setSelectingId] = useState<number | null>(null);
   const timeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAbort = useRef<AbortController | null>(null);
+  const detailsAbort = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      searchAbort.current?.abort();
+      detailsAbort.current?.abort();
+    };
+  }, []);
 
   async function runSearch(title: string, category: string) {
     if (timeout.current) clearTimeout(timeout.current);
+    searchAbort.current?.abort();
     const path = searchPath(category);
     if (!path || title.trim().length < 2) {
       setOpen(false);
       return;
     }
     timeout.current = setTimeout(async () => {
+      const controller = new AbortController();
+      searchAbort.current = controller;
       try {
-        let res = await fetch(`${path}?query=${encodeURIComponent(title.trim())}`);
+        let res = await fetch(`${path}?query=${encodeURIComponent(title.trim())}`, {
+          signal: controller.signal,
+        });
         let data: SearchResult[] = await res.json();
         if (data.length === 0 && category === "movie") {
-          res = await fetch(`/app/anilist/search?query=${encodeURIComponent(title.trim())}`);
+          res = await fetch(`/app/anilist/search?query=${encodeURIComponent(title.trim())}`, {
+            signal: controller.signal,
+          });
           if (res.ok) data = await res.json();
         }
         setResults(data);
         setOpen(true);
-      } catch {
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
         setOpen(false);
       }
     }, 350);
   }
 
   async function select(result: SearchResult) {
-    setOpen(false);
     const url = detailsUrl(card.category, result.id);
     if (!url) {
       onChange({ title: result.title, cover_url: result.poster ?? card.cover_url });
+      setOpen(false);
       return;
     }
+    detailsAbort.current?.abort();
+    const controller = new AbortController();
+    detailsAbort.current = controller;
+    setSelectingId(result.id);
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
       const d = await res.json();
       onChange({
         title: d.title || result.title,
@@ -358,8 +380,13 @@ function ImportCardRow({
         platform: d.platform || card.platform,
         category: d.category || card.category,
       });
-    } catch {
+      setOpen(false);
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return;
       onChange({ title: result.title, cover_url: result.poster ?? card.cover_url });
+      setOpen(false);
+    } finally {
+      if (detailsAbort.current === controller) setSelectingId(null);
     }
   }
 
@@ -403,7 +430,8 @@ function ImportCardRow({
                     key={r.id}
                     type="button"
                     onClick={() => select(r)}
-                    className="flex items-center gap-3 px-4 py-3 text-left w-full hover:bg-[var(--hover-bg)] cursor-pointer border-0 bg-transparent text-[var(--text)] text-sm"
+                    disabled={selectingId !== null}
+                    className="flex items-center gap-3 px-4 py-3 text-left w-full hover:bg-[var(--hover-bg)] cursor-pointer border-0 bg-transparent text-[var(--text)] text-sm disabled:opacity-50 disabled:cursor-wait"
                   >
                     {r.poster ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -419,6 +447,9 @@ function ImportCardRow({
                         </div>
                       ) : null}
                     </div>
+                    {selectingId === r.id && (
+                      <span className="text-[var(--muted)] text-[10px] shrink-0">Carregando…</span>
+                    )}
                   </button>
                 ))}
               </div>

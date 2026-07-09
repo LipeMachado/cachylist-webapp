@@ -1,15 +1,77 @@
 import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import { authConfig } from "@/auth.config";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 // Next.js 16 renamed the "middleware" convention to "proxy". Same signature.
 const { auth } = NextAuth(authConfig);
+
+const isDev = process.env.NODE_ENV !== "production";
+
+// Per-request nonce-based CSP, following Next.js' documented pattern: the nonce
+// is threaded onto the *request* headers (not just the response) so the App
+// Router's own streaming/hydration <script> tags get tagged with it automatically.
+// A static CSP without a nonce would otherwise block those inline scripts outright.
+function buildCsp(nonce: string): string {
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
+    "style-src 'self' 'unsafe-inline'",
+    // img-src stays broad because media covers are user-supplied URLs from any host.
+    "img-src 'self' https: data:",
+    "font-src 'self' data:",
+    `connect-src 'self'${isDev ? " ws:" : ""}`,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    ...(isDev ? [] : ["upgrade-insecure-requests"]),
+  ].join("; ");
+}
 
 // Protect the private app area. Everything under /app plus the account edit page
 // (/edit) requires authentication, mirroring Rails' `before_action :authenticate_user!`.
 export default auth((req) => {
   const { pathname } = req.nextUrl;
   const isLoggedIn = !!req.auth;
+  const ip = clientIp(req);
+
+  const nonce = crypto.randomUUID().replace(/-/g, "");
+  const csp = buildCsp(nonce);
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("Content-Security-Policy", csp);
+  const withCsp = <T extends NextResponse>(res: T): T => {
+    res.headers.set("Content-Security-Policy", csp);
+    return res;
+  };
+
+  // Throttle login/register/password-reset submissions per IP to blunt
+  // brute-force and credential-stuffing attempts against the single-connection DB.
+  const isAuthSubmission =
+    req.method === "POST" &&
+    (pathname === "/login" || pathname === "/register" || pathname.startsWith("/password"));
+  if (isAuthSubmission && !rateLimit(`auth:${ip}`, 20, 10 * 60 * 1000).allowed) {
+    return withCsp(
+      NextResponse.json(
+        { error: "Muitas tentativas. Tente novamente em alguns minutos." },
+        { status: 429 }
+      )
+    );
+  }
+
+  // Throttle the search/details/identify proxy routes so a single client can't
+  // hammer upstream providers (TMDB/AniList/Steam) or the DB behind them.
+  const isSearchApi =
+    pathname.startsWith("/app/anilist/") ||
+    pathname.startsWith("/app/tmdb/") ||
+    pathname.startsWith("/app/steam/") ||
+    pathname.startsWith("/app/identify");
+  if (isSearchApi && !rateLimit(`search:${ip}`, 60, 60 * 1000).allowed) {
+    return withCsp(
+      NextResponse.json({ error: "Muitas requisições. Aguarde um instante." }, { status: 429 })
+    );
+  }
 
   const isPrivate =
     pathname === "/edit" ||
@@ -18,7 +80,7 @@ export default auth((req) => {
 
   if (isPrivate && !isLoggedIn) {
     const url = new URL("/login", req.nextUrl.origin);
-    return NextResponse.redirect(url);
+    return withCsp(NextResponse.redirect(url));
   }
 
   // Logged-in users hitting auth pages go to the dashboard.
@@ -27,10 +89,10 @@ export default auth((req) => {
     pathname === "/register" ||
     pathname.startsWith("/password");
   if (isAuthPage && isLoggedIn) {
-    return NextResponse.redirect(new URL("/app", req.nextUrl.origin));
+    return withCsp(NextResponse.redirect(new URL("/app", req.nextUrl.origin)));
   }
 
-  return NextResponse.next();
+  return withCsp(NextResponse.next({ request: { headers: requestHeaders } }));
 });
 
 export const config = {

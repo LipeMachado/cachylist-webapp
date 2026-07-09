@@ -70,18 +70,41 @@ export interface ImportItemInput {
   platform?: string;
 }
 
+// Caps guard against a single import monopolizing the (single-connection) DB
+// pool and against pathologically long user-supplied strings bloating storage.
+export const MAX_IMPORT_ITEMS = 5000;
+const MAX_TITLE_LENGTH = 500;
+const MAX_TEXT_LENGTH = 5000;
+const MAX_URL_LENGTH = 2000;
+
+function clip(value: string | undefined, max: number): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.slice(0, max) : null;
+}
+
 export async function createItems(
   items: ImportItemInput[],
   userId: number
 ): Promise<number> {
-  let created = 0;
+  const capped = items.slice(0, MAX_IMPORT_ITEMS);
 
   // Compute the next sortOrder per status once, then increment locally — avoids
   // an aggregate query per item (which made large imports crawl).
   const maxByStatus = new Map<number, number>();
+  const rows: {
+    userId: number;
+    title: string;
+    category: number;
+    status: number;
+    coverUrl: string | null;
+    description: string | null;
+    releaseYear: number | null;
+    platform: string | null;
+    sortOrder: number;
+  }[] = [];
 
-  for (const data of items) {
-    const title = data.title?.trim();
+  for (const data of capped) {
+    const title = clip(data.title, MAX_TITLE_LENGTH);
     if (!title) continue;
 
     const categoryKey = (data.category?.trim() || "anime") as CategoryKey;
@@ -102,24 +125,24 @@ export async function createItems(
     const nextSort = maxByStatus.get(statusInt)! + 1;
     maxByStatus.set(statusInt, nextSort);
 
-    try {
-      await prisma.mediaItem.create({
-        data: {
-          userId,
-          title,
-          category: CATEGORY_TO_INT[categoryKey] ?? CATEGORY_TO_INT.anime,
-          status: statusInt,
-          coverUrl: data.cover_url?.trim() || null,
-          description: data.description?.trim() || null,
-          releaseYear: Number.isFinite(releaseYear) ? releaseYear : null,
-          platform: data.platform?.trim() || null,
-          sortOrder: nextSort,
-        },
-      });
-      created++;
-    } catch {
-      // duplicate title (unique scope user_id+title) or invalid — skip, mirroring Rails
-    }
+    rows.push({
+      userId,
+      title,
+      category: CATEGORY_TO_INT[categoryKey] ?? CATEGORY_TO_INT.anime,
+      status: statusInt,
+      coverUrl: clip(data.cover_url, MAX_URL_LENGTH),
+      description: clip(data.description, MAX_TEXT_LENGTH),
+      releaseYear: Number.isFinite(releaseYear) ? releaseYear : null,
+      platform: clip(data.platform, 200),
+      sortOrder: nextSort,
+    });
   }
-  return created;
+
+  if (rows.length === 0) return 0;
+
+  // Single batched insert instead of one round-trip per row — duplicate
+  // titles (unique scope user_id+title) are silently skipped, mirroring the
+  // previous per-row try/catch behavior.
+  const result = await prisma.mediaItem.createMany({ data: rows, skipDuplicates: true });
+  return result.count;
 }

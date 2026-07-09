@@ -1,5 +1,8 @@
 import type { NextConfig } from "next";
 
+// Content-Security-Policy is set per-request in proxy.ts instead of here: it
+// needs a fresh nonce per request so Next's own inline hydration/streaming
+// scripts (which a static, nonce-less CSP would otherwise block) stay allowed.
 const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },

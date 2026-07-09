@@ -32,6 +32,8 @@ export default function Board({
   addButton?: boolean;
 }) {
   const [columns, setColumns] = useState(serverColumns);
+  const [persistFailed, setPersistFailed] = useState(false);
+  const retryPersistRef = useRef<() => void>(() => {});
 
   // Re-sync only when the server data actually changes (add / edit / delete),
   // gated by a lightweight signature so optimistic drags aren't clobbered.
@@ -84,7 +86,11 @@ export default function Board({
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ columns: payload }),
       })
-        .catch(() => {})
+        .then((res) => {
+          if (!res.ok) throw new Error(`reorder failed: ${res.status}`);
+          setPersistFailed(false);
+        })
+        .catch(() => setPersistFailed(true))
         .finally(() => {
           inFlight = false;
           if (again) {
@@ -93,6 +99,7 @@ export default function Board({
           }
         });
     };
+    retryPersistRef.current = runPersist;
     const schedulePersist = () => {
       if (timer) clearTimeout(timer);
       timer = setTimeout(runPersist, PERSIST_DELAY);
@@ -254,6 +261,23 @@ export default function Board({
 
   return (
     <div ref={rootRef} className={className} data-controller="board">
+      {persistFailed && (
+        <div className="fixed z-50 right-5.5 bottom-5.5 grid gap-2.5 w-[min(380px,calc(100vw-32px))]">
+          <p className="flash-message m-0 border border-[var(--line)] p-3.5 bg-[var(--panel-bg)] text-[var(--text)] flex items-center justify-between gap-3">
+            <span>Não foi possível salvar a nova ordem.</span>
+            <button
+              type="button"
+              onClick={() => {
+                setPersistFailed(false);
+                retryPersistRef.current();
+              }}
+              className="shrink-0 text-[11px] font-bold tracking-[.1em] uppercase text-[var(--accent)] bg-transparent border-0 cursor-pointer hover:underline"
+            >
+              Tentar novamente
+            </button>
+          </p>
+        </div>
+      )}
       {columns.map((col) => (
         <div
           key={col.status}

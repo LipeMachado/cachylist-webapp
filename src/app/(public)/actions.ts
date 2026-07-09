@@ -9,6 +9,7 @@ import { registrationEnabled } from "@/lib/config";
 
 const BCRYPT_COST = 12; // matches Devise stretches=12 → hashes interoperate both ways
 const PASSWORD_MIN = 6;
+const PASSWORD_MAX = 200;
 const RESET_WINDOW_MS = 6 * 60 * 60 * 1000; // Devise default reset_password_within (6h)
 
 export interface AuthFormState {
@@ -54,10 +55,11 @@ export async function registerAction(
   const errors: string[] = [];
 
   if (!email) errors.push("E-mail é obrigatório");
+  else if (email.length > 255) errors.push("E-mail muito longo");
   else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) errors.push("E-mail inválido");
 
-  if (password.length < PASSWORD_MIN)
-    errors.push(`Senha deve ter no mínimo ${PASSWORD_MIN} caracteres`);
+  if (password.length < PASSWORD_MIN || password.length > PASSWORD_MAX)
+    errors.push(`Senha deve ter entre ${PASSWORD_MIN} e ${PASSWORD_MAX} caracteres`);
   if (password !== confirmation) errors.push("A confirmação de senha não confere");
 
   if (username) {
@@ -67,27 +69,30 @@ export async function registerAction(
       errors.push("Nome de usuário deve ter entre 3 e 30 caracteres");
   }
 
-  if (errors.length === 0) {
-    const existingEmail = await prisma.user.findUnique({ where: { email } });
-    if (existingEmail) errors.push("E-mail já está em uso");
-    if (username) {
-      const existingUsername = await prisma.user.findUnique({ where: { username } });
-      if (existingUsername) errors.push("Nome de usuário já está em uso");
-    }
+  if (errors.length === 0 && username) {
+    const existingUsername = await prisma.user.findUnique({ where: { username } });
+    if (existingUsername) errors.push("Nome de usuário já está em uso");
   }
 
   if (errors.length > 0) return { error: errors.join(". ") };
 
-  const encryptedPassword = await bcrypt.hash(password, BCRYPT_COST);
-  await prisma.user.create({
-    data: { email, username: username || null, encryptedPassword },
-  });
+  // Don't reveal whether the email is already registered (avoids user
+  // enumeration); silently no-op and let the sign-in below fail/redirect
+  // the same way it would for a brand-new account.
+  const existingEmail = await prisma.user.findUnique({ where: { email } });
+  if (!existingEmail) {
+    const encryptedPassword = await bcrypt.hash(password, BCRYPT_COST);
+    await prisma.user.create({
+      data: { email, username: username || null, encryptedPassword },
+    });
+  }
 
   try {
     await signIn("credentials", { email, password, redirectTo: "/app" });
     return {};
   } catch (error) {
-    if (error instanceof AuthError) return { error: "Conta criada. Faça login." };
+    if (error instanceof AuthError)
+      return { error: "Não foi possível concluir o cadastro. Se você já tem uma conta, faça login." };
     throw error;
   }
 }
@@ -132,8 +137,8 @@ export async function resetPassword(
   const confirmation = String(formData.get("password_confirmation") ?? "");
 
   if (!raw) return { error: "Token de redefinição ausente ou inválido." };
-  if (password.length < PASSWORD_MIN)
-    return { error: `Senha deve ter no mínimo ${PASSWORD_MIN} caracteres.` };
+  if (password.length < PASSWORD_MIN || password.length > PASSWORD_MAX)
+    return { error: `Senha deve ter entre ${PASSWORD_MIN} e ${PASSWORD_MAX} caracteres.` };
   if (password !== confirmation) return { error: "A confirmação de senha não confere." };
 
   const user = await prisma.user.findFirst({

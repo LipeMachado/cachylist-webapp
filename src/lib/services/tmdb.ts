@@ -1,7 +1,10 @@
 // TMDB integration — ports TmdbService + TmdbController formatting.
+import { readCache, writeCache } from "@/lib/services/cache";
 
 const BASE_URL = "https://api.themoviedb.org/3";
 export const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
+const SEARCH_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
+const DETAILS_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7d
 
 interface TmdbRaw {
   id: number;
@@ -62,6 +65,11 @@ function extractYear(item: TmdbRaw): number | null {
 
 export async function tmdbSearch(query: string): Promise<TmdbSearchResult[]> {
   if (!query || query.length < 2) return [];
+
+  const cacheKey = `tmdb:search:${query.toLowerCase().trim()}`;
+  const cached = readCache<TmdbSearchResult[]>(cacheKey);
+  if (cached) return cached;
+
   const data = await get("/search/multi", {
     query,
     language: "pt-BR",
@@ -69,7 +77,7 @@ export async function tmdbSearch(query: string): Promise<TmdbSearchResult[]> {
     include_adult: false,
   });
   const results = (data.results as TmdbRaw[] | undefined) ?? [];
-  return results
+  const formatted = results
     .filter((r) => r.media_type === "movie" || r.media_type === "tv")
     .slice(0, 6)
     .map((r) => ({
@@ -80,9 +88,15 @@ export async function tmdbSearch(query: string): Promise<TmdbSearchResult[]> {
       poster: r.poster_path ? `${TMDB_IMAGE_BASE}/w92${r.poster_path}` : null,
       overview: r.overview ? r.overview.slice(0, 100) : null,
     }));
+  writeCache(cacheKey, formatted, SEARCH_CACHE_TTL);
+  return formatted;
 }
 
-export async function tmdbDetails(type: string, id: string) {
+export async function tmdbDetails(type: "movie" | "tv", id: string) {
+  const cacheKey = `tmdb:details:${type}:${id}`;
+  const cached = readCache<Record<string, unknown>>(cacheKey);
+  if (cached) return cached;
+
   const details = (await get(`/${type}/${id}`, {
     language: "pt-BR",
     append_to_response: "credits",
@@ -97,20 +111,23 @@ export async function tmdbDetails(type: string, id: string) {
       : null,
   };
 
-  if (type === "movie") {
-    return {
-      ...base,
-      category: "movie",
-      duration_minutes: details.runtime ?? null,
-      director:
-        details.credits?.crew?.find((c) => c.job === "Director")?.name ?? null,
-    };
-  }
-  return {
-    ...base,
-    category: "series",
-    total_seasons: details.number_of_seasons ?? null,
-    total_episodes: details.number_of_episodes ?? null,
-    platform: details.networks?.[0]?.name ?? null,
-  };
+  const result =
+    type === "movie"
+      ? {
+          ...base,
+          category: "movie",
+          duration_minutes: details.runtime ?? null,
+          director:
+            details.credits?.crew?.find((c) => c.job === "Director")?.name ?? null,
+        }
+      : {
+          ...base,
+          category: "series",
+          total_seasons: details.number_of_seasons ?? null,
+          total_episodes: details.number_of_episodes ?? null,
+          platform: details.networks?.[0]?.name ?? null,
+        };
+
+  writeCache(cacheKey, result, DETAILS_CACHE_TTL);
+  return result;
 }

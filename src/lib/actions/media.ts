@@ -18,10 +18,16 @@ export interface MediaActionState {
   id?: number;
 }
 
-function str(formData: FormData, key: string): string | null {
+// Hard length caps on user-supplied text — prevents pathologically large
+// strings from bloating storage (Postgres TEXT columns are unbounded).
+const MAX_SHORT_LENGTH = 500; // title, platform, author, director
+const MAX_LONG_LENGTH = 5000; // description, notes
+const MAX_URL_LENGTH = 2000;
+
+function str(formData: FormData, key: string, maxLength = MAX_LONG_LENGTH): string | null {
   const v = formData.get(key);
   if (v == null) return null;
-  const s = String(v).trim();
+  const s = String(v).trim().slice(0, maxLength);
   return s.length ? s : null;
 }
 
@@ -53,7 +59,7 @@ function buildData(formData: FormData): {
 } {
   const errors: string[] = [];
 
-  const title = str(formData, "title");
+  const title = str(formData, "title", MAX_SHORT_LENGTH);
   const categoryRaw = (str(formData, "category") ?? "anime") as CategoryKey;
   const statusRaw = (str(formData, "status") ?? "planned") as StatusKey;
 
@@ -75,14 +81,14 @@ function buildData(formData: FormData): {
 
   const data = {
     title: title ?? "",
-    description: str(formData, "description"),
+    description: str(formData, "description", MAX_LONG_LENGTH),
     category: categoryInt,
     status: statusInt,
-    platform: str(formData, "platform"),
+    platform: str(formData, "platform", MAX_SHORT_LENGTH),
     releaseYear,
     rating,
-    notes: str(formData, "notes"),
-    coverUrl: str(formData, "cover_url"),
+    notes: str(formData, "notes", MAX_LONG_LENGTH),
+    coverUrl: str(formData, "cover_url", MAX_URL_LENGTH),
     startedAt: date(formData, "started_at"),
     finishedAt: date(formData, "finished_at"),
     currentEpisode: episodic ? int(formData, "current_episode") : null,
@@ -91,8 +97,8 @@ function buildData(formData: FormData): {
     totalSeasons: episodic ? int(formData, "total_seasons") : null,
     currentPage: int(formData, "current_page"),
     totalPages: int(formData, "total_pages"),
-    author: str(formData, "author"),
-    director: str(formData, "director"),
+    author: str(formData, "author", MAX_SHORT_LENGTH),
+    director: str(formData, "director", MAX_SHORT_LENGTH),
     durationMinutes: int(formData, "duration_minutes"),
     hoursPlayed: int(formData, "hours_played"),
     wantsPlatinum: bool(formData, "wants_platinum"),
