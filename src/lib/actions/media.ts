@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import {
@@ -192,4 +193,8 @@ export async function deleteMedia(id: number): Promise<void> {
   await prisma.mediaItem.deleteMany({ where: { id, userId: user.id } });
   revalidatePath("/app");
   revalidatePath("/app/library");
+  // Server-side redirect (same pattern as updateAccount) so Toaster's single
+  // notice-param slot works the same way for deletes as for every other
+  // mutation, instead of a client-side router.push racing a second flash.
+  redirect(`/app/library?notice=${encodeURIComponent("Mídia removida com sucesso.")}`);
 }

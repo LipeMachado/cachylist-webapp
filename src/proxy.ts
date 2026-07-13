@@ -48,10 +48,25 @@ export default auth((req) => {
 
   // Throttle login/register/password-reset submissions per IP to blunt
   // brute-force and credential-stuffing attempts against the single-connection DB.
-  const isAuthSubmission =
-    req.method === "POST" &&
-    (pathname === "/login" || pathname === "/register" || pathname.startsWith("/password"));
-  if (isAuthSubmission && !rateLimit(`auth:${ip}`, 20, 10 * 60 * 1000).allowed) {
+  // Each action gets its own bucket so hammering /register can't also lock out
+  // /login attempts (and vice versa) for the same IP.
+  // Includes /api/auth/callback/*: that's NextAuth's own credential-verification
+  // endpoint (what signIn() ultimately posts to), which the broad matcher below
+  // otherwise excludes entirely — without this it was the one path that bypassed
+  // this throttle no matter how the other auth pages are guarded.
+  const authAction =
+    req.method !== "POST"
+      ? null
+      : pathname === "/login"
+        ? "login"
+        : pathname === "/register"
+          ? "register"
+          : pathname.startsWith("/password")
+            ? "password"
+            : pathname.startsWith("/api/auth/callback")
+              ? "callback"
+              : null;
+  if (authAction && !rateLimit(`auth:${authAction}:${ip}`, 20, 10 * 60 * 1000).allowed) {
     return withCsp(
       NextResponse.json(
         { error: "Muitas tentativas. Tente novamente em alguns minutos." },
@@ -73,6 +88,15 @@ export default auth((req) => {
     );
   }
 
+  // Throttle the bulk importer's write step: each confirm can insert up to
+  // MAX_IMPORT_ITEMS (5000) rows against the same single-connection DB pool.
+  const isBulkWriteApi = pathname === "/app/import" && req.method === "POST";
+  if (isBulkWriteApi && !rateLimit(`import:${ip}`, 5, 5 * 60 * 1000).allowed) {
+    return withCsp(
+      NextResponse.json({ error: "Muitas importações. Aguarde um instante." }, { status: 429 })
+    );
+  }
+
   const isPrivate =
     pathname === "/edit" ||
     pathname.startsWith("/app") ||
@@ -83,11 +107,13 @@ export default auth((req) => {
     return withCsp(NextResponse.redirect(url));
   }
 
-  // Logged-in users hitting auth pages go to the dashboard.
+  // Logged-in users hitting auth pages go to the dashboard — except
+  // /password/edit: a still-logged-in user clicking their emailed reset link
+  // must still land there, or the token in the URL is lost to this redirect.
   const isAuthPage =
     pathname === "/login" ||
     pathname === "/register" ||
-    pathname.startsWith("/password");
+    (pathname.startsWith("/password") && pathname !== "/password/edit");
   if (isAuthPage && isLoggedIn) {
     return withCsp(NextResponse.redirect(new URL("/app", req.nextUrl.origin)));
   }
@@ -96,5 +122,10 @@ export default auth((req) => {
 });
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|webp|svg|ico)$).*)"],
+  matcher: [
+    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|webp|svg|ico)$).*)",
+    // NextAuth's own credential-verification endpoint — needs the auth-submission
+    // rate limit above even though the pattern otherwise excludes all of /api.
+    "/api/auth/callback/:path*",
+  ],
 };

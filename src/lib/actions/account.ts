@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { signOut } from "@/auth";
 import { AVATAR_OPTIONS } from "@/lib/media";
+import { rateLimit } from "@/lib/rate-limit";
 
 const BCRYPT_COST = 12;
 
@@ -36,18 +37,16 @@ export async function updateAccount(
   }
 
   if (errors.length === 0) {
-    if (email !== user.email) {
-      const dupe = await prisma.user.findFirst({
-        where: { email, id: { not: user.id } },
-      });
-      if (dupe) errors.push("E-mail já está em uso");
-    }
-    if (username && username !== user.username) {
-      const dupe = await prisma.user.findFirst({
-        where: { username, id: { not: user.id } },
-      });
-      if (dupe) errors.push("Nome de usuário já está em uso");
-    }
+    const [emailDupe, usernameDupe] = await Promise.all([
+      email !== user.email
+        ? prisma.user.findFirst({ where: { email, id: { not: user.id } } })
+        : null,
+      username && username !== user.username
+        ? prisma.user.findFirst({ where: { username, id: { not: user.id } } })
+        : null,
+    ]);
+    if (emailDupe) errors.push("E-mail já está em uso");
+    if (usernameDupe) errors.push("Nome de usuário já está em uso");
   }
 
   if (errors.length) return { error: errors.join(". ") };
@@ -66,6 +65,13 @@ export async function updatePassword(
   formData: FormData
 ): Promise<AccountState> {
   const user = await requireUser();
+
+  // A hijacked/stolen session could otherwise brute-force the real password
+  // via this form with no limit — the auth-page throttle in proxy.ts doesn't
+  // cover this path.
+  if (!rateLimit(`pwd-change:${user.id}`, 10, 10 * 60 * 1000).allowed)
+    return { error: "Muitas tentativas. Aguarde alguns minutos e tente novamente." };
+
   const current = String(formData.get("current_password") ?? "");
   const password = String(formData.get("password") ?? "");
   const confirmation = String(formData.get("password_confirmation") ?? "");

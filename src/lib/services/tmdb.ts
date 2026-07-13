@@ -1,10 +1,9 @@
 // TMDB integration — ports TmdbService + TmdbController formatting.
 import { readCache, writeCache } from "@/lib/services/cache";
+import { SEARCH_CACHE_TTL_MS, DETAILS_CACHE_TTL_MS } from "@/lib/config";
 
 const BASE_URL = "https://api.themoviedb.org/3";
 export const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
-const SEARCH_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
-const DETAILS_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7d
 
 interface TmdbRaw {
   id: number;
@@ -50,6 +49,10 @@ async function get(path: string, params: Record<string, string | number | boolea
       headers: { Authorization: `Bearer ${t}`, Accept: "application/json" },
       signal: AbortSignal.timeout(5000),
     });
+    if (!res.ok) {
+      console.error(`TMDB API error: ${res.status} ${path}`);
+      return { results: [] };
+    }
     return (await res.json()) as Record<string, unknown>;
   } catch (e) {
     console.error("TMDB API error:", (e as Error).message);
@@ -88,7 +91,7 @@ export async function tmdbSearch(query: string): Promise<TmdbSearchResult[]> {
       poster: r.poster_path ? `${TMDB_IMAGE_BASE}/w92${r.poster_path}` : null,
       overview: r.overview ? r.overview.slice(0, 100) : null,
     }));
-  writeCache(cacheKey, formatted, SEARCH_CACHE_TTL);
+  writeCache(cacheKey, formatted, SEARCH_CACHE_TTL_MS);
   return formatted;
 }
 
@@ -128,6 +131,6 @@ export async function tmdbDetails(type: "movie" | "tv", id: string) {
           platform: details.networks?.[0]?.name ?? null,
         };
 
-  writeCache(cacheKey, result, DETAILS_CACHE_TTL);
+  writeCache(cacheKey, result, DETAILS_CACHE_TTL_MS);
   return result;
 }

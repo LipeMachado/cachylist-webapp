@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Loader2 } from "lucide-react";
 import { KanbanAddButton } from "./buttons";
 import { statusClass, statusLabel, type StatusKey } from "@/lib/media";
+import { MEDIA_PAGE_SIZE } from "@/lib/pagination";
 
 export interface BoardItem {
   id: number;
@@ -15,6 +17,41 @@ export interface BoardColumn {
 
 const DRAG_THRESHOLD = 5;
 const PERSIST_DELAY = 350;
+
+// Reveals the next MEDIA_PAGE_SIZE cards for one column once it scrolls near
+// the bottom — same visual pattern as the library grid's infinite scroll, but
+// with no fetch: the board already holds every item for every column in
+// memory (drag-and-drop needs the full, correctly-ordered list to persist
+// sort order right), so "loading more" here is just rendering more of what's
+// already there.
+function ColumnLoadMoreSentinel({
+  status,
+  onReach,
+}: {
+  status: StatusKey;
+  onReach: (status: StatusKey) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) onReach(status);
+      },
+      { rootMargin: "600px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [status, onReach]);
+
+  return (
+    <div ref={ref} className="flex items-center justify-center py-6">
+      <Loader2 size={18} className="animate-spin text-[var(--muted)]" aria-label="Carregando mais itens" />
+    </div>
+  );
+}
 
 // Declarative drag-and-drop board. React owns the order via state; drops update
 // state and React re-renders. The cards are server-rendered RSC nodes (passed in
@@ -35,6 +72,19 @@ export default function Board({
   const [persistFailed, setPersistFailed] = useState(false);
   const retryPersistRef = useRef<() => void>(() => {});
 
+  // How many cards to *render* per column — independent of `columns`, which
+  // always holds every item (drag-and-drop and persistence need the full
+  // order). Starts at one page per column, same as the library grid.
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>(() =>
+    Object.fromEntries(serverColumns.map((c) => [c.status, MEDIA_PAGE_SIZE]))
+  );
+  const revealMore = useCallback((status: StatusKey) => {
+    setVisibleCounts((prev) => ({
+      ...prev,
+      [status]: (prev[status] ?? MEDIA_PAGE_SIZE) + MEDIA_PAGE_SIZE,
+    }));
+  }, []);
+
   // Re-sync only when the server data actually changes (add / edit / delete),
   // gated by a lightweight signature so optimistic drags aren't clobbered.
   const signature = serverColumns
@@ -45,6 +95,7 @@ export default function Board({
     if (sigRef.current !== signature) {
       sigRef.current = signature;
       setColumns(serverColumns);
+      setVisibleCounts(Object.fromEntries(serverColumns.map((c) => [c.status, MEDIA_PAGE_SIZE])));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
@@ -278,25 +329,31 @@ export default function Board({
           </p>
         </div>
       )}
-      {columns.map((col) => (
-        <div
-          key={col.status}
-          data-board-status={col.status}
-          className="kanban-column border-r border-[var(--line)] bg-[var(--column-bg)] [&:last-child]:border-r-0"
-        >
-          <header className="min-h-[60px] px-6 border-b border-[var(--line)] flex items-center gap-2 text-[10px] font-bold tracking-[.16em] uppercase text-[var(--muted)]">
-            <span className={`w-1.5 h-1.5 bg-[var(--accent)] inline-block flex-[0_0_6px] ${statusClass(col.status)}`} />
-            <strong className="font-bold text-[var(--muted)] truncate">{statusLabel(col.status)}</strong>
-            <small className="ml-auto text-[var(--tertiary)] text-[11px] tracking-[.04em]">{col.items.length}</small>
-            {addButton && <KanbanAddButton status={col.status} category={category} />}
-          </header>
-          {col.items.map((item) => (
-            <div key={item.id} className="contents">
-              {item.node}
-            </div>
-          ))}
-        </div>
-      ))}
+      {columns.map((col) => {
+        const visibleCount = visibleCounts[col.status] ?? MEDIA_PAGE_SIZE;
+        const windowed = col.items.slice(0, visibleCount);
+        const hasMore = col.items.length > visibleCount;
+        return (
+          <div
+            key={col.status}
+            data-board-status={col.status}
+            className="kanban-column border-r border-[var(--line)] bg-[var(--column-bg)] [&:last-child]:border-r-0"
+          >
+            <header className="min-h-[60px] px-6 border-b border-[var(--line)] flex items-center gap-2 text-[10px] font-bold tracking-[.16em] uppercase text-[var(--muted)]">
+              <span className={`w-1.5 h-1.5 bg-[var(--accent)] inline-block flex-[0_0_6px] ${statusClass(col.status)}`} />
+              <strong className="font-bold text-[var(--muted)] truncate">{statusLabel(col.status)}</strong>
+              <small className="ml-auto text-[var(--tertiary)] text-[11px] tracking-[.04em]">{col.items.length}</small>
+              {addButton && <KanbanAddButton status={col.status} category={category} />}
+            </header>
+            {windowed.map((item) => (
+              <div key={item.id} className="contents">
+                {item.node}
+              </div>
+            ))}
+            {hasMore && <ColumnLoadMoreSentinel status={col.status} onReach={revealMore} />}
+          </div>
+        );
+      })}
     </div>
   );
 }

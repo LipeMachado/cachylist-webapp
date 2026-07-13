@@ -1,10 +1,9 @@
 // Steam store integration — ports SteamService + SteamController formatting.
 import { readCache, writeCache } from "@/lib/services/cache";
+import { SEARCH_CACHE_TTL_MS, DETAILS_CACHE_TTL_MS } from "@/lib/config";
 
 const SEARCH_URL = "https://store.steampowered.com/api/storesearch/";
 const DETAILS_URL = "https://store.steampowered.com/api/appdetails";
-const SEARCH_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
-const DETAILS_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7d
 
 interface SteamSearchItem {
   id: number;
@@ -26,6 +25,10 @@ async function get(url: string, params: Record<string, string | number>) {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(5000),
     });
+    if (!res.ok) {
+      console.error(`Steam API error: ${res.status} ${url}`);
+      return {};
+    }
     return (await res.json()) as Record<string, unknown>;
   } catch (e) {
     console.error("Steam API error:", (e as Error).message);
@@ -51,7 +54,7 @@ export async function steamSearch(query: string): Promise<SteamSearchResult[]> {
     title: r.name,
     poster: r.tiny_image ?? null,
   }));
-  writeCache(cacheKey, results, SEARCH_CACHE_TTL);
+  writeCache(cacheKey, results, SEARCH_CACHE_TTL_MS);
   return results;
 }
 
@@ -84,6 +87,6 @@ export async function steamDetails(appId: string | number) {
     category: "game" as const,
     platform: "Steam",
   };
-  writeCache(cacheKey, result, DETAILS_CACHE_TTL);
+  writeCache(cacheKey, result, DETAILS_CACHE_TTL_MS);
   return result;
 }

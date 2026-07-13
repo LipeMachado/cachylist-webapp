@@ -1,10 +1,10 @@
 // AniList integration — ports AniListService + AnilistController formatting.
 import { readCache, writeCache } from "@/lib/services/cache";
+import { SEARCH_CACHE_TTL_MS, DETAILS_CACHE_TTL_MS } from "@/lib/config";
+import { normalizeTitle } from "@/lib/text";
 
 const GRAPHQL_URL = "https://graphql.anilist.co";
 const SEARCH_LIMIT = 8;
-const SEARCH_CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
-const DETAILS_CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7d
 const DETAILS_CACHE_VERSION = "v1";
 
 export interface AnilistSearchResult {
@@ -26,17 +26,6 @@ interface AnilistMedia {
   averageScore?: number;
   format?: string;
   description?: string;
-}
-
-function normalize(value: string): string {
-  return value
-    .toString()
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim()
-    .replace(/\s+/g, " ");
 }
 
 async function post(query: string, variables: Record<string, unknown>) {
@@ -99,7 +88,7 @@ function formatSearch(media: AnilistMedia): AnilistSearchResult {
 }
 
 export async function anilistSearch(query: string): Promise<AnilistSearchResult[]> {
-  const normalized = normalize(query);
+  const normalized = normalizeTitle(query);
   if (!normalized) return [];
 
   const cacheKey = `anilist:search:${normalized}`;
@@ -110,7 +99,7 @@ export async function anilistSearch(query: string): Promise<AnilistSearchResult[
     const response = await post(SEARCH_QUERY, { search: query, perPage: SEARCH_LIMIT });
     const media: AnilistMedia[] = response?.data?.Page?.media ?? [];
     const results = media.map(formatSearch);
-    writeCache(cacheKey, results, SEARCH_CACHE_TTL);
+    writeCache(cacheKey, results, SEARCH_CACHE_TTL_MS);
     return results;
   } catch (e) {
     console.error("AniList search error:", (e as Error).message);
@@ -152,7 +141,7 @@ export async function anilistDetails(id: string | number): Promise<AnilistDetail
       format: media.format ?? null,
       category: media.format === "MOVIE" ? "anime_movie" : "anime",
     };
-    writeCache(cacheKey, result, DETAILS_CACHE_TTL);
+    writeCache(cacheKey, result, DETAILS_CACHE_TTL_MS);
     return result;
   } catch (e) {
     console.error(`AniList details error for ${id}:`, (e as Error).message);

@@ -2,13 +2,13 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
+import { unstable_rethrow } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { deleteMedia } from "@/lib/actions/media";
 
 export default function DeleteMediaButton({ id }: { id: number }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -21,9 +21,15 @@ export default function DeleteMediaButton({ id }: { id: number }) {
   }, [open, pending]);
 
   function confirmDelete() {
+    setError(null);
     startTransition(async () => {
-      await deleteMedia(id);
-      router.push("/app/library?notice=" + encodeURIComponent("Mídia removida com sucesso."));
+      try {
+        // deleteMedia redirects to /app/library on success (throws internally).
+        await deleteMedia(id);
+      } catch (e) {
+        unstable_rethrow(e); // let the redirect (or any Next.js navigation error) through
+        setError("Não foi possível remover. Tente novamente.");
+      }
     });
   }
 
@@ -61,6 +67,9 @@ export default function DeleteMediaButton({ id }: { id: number }) {
               <p className="text-[13px] leading-[1.6] text-[var(--muted)] m-0 mb-6 tracking-[.01em]">
                 Esta ação é irreversível. O item será removido permanentemente da sua biblioteca.
               </p>
+              {error && (
+                <p className="text-[13px] leading-[1.6] text-[#e06666] m-0 mb-6 tracking-[.01em]">{error}</p>
+              )}
               <div className="flex gap-3 justify-end flex-wrap">
                 <button
                   type="button"

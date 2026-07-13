@@ -37,6 +37,12 @@ export function rateLimit(key: string, limit: number, windowMs: number): RateLim
   return { allowed: bucket.count <= limit, resetAt: bucket.resetAt };
 }
 
+// NOTE: this trusts X-Forwarded-For/X-Real-IP as-is. That's only safe when the
+// app sits behind a proxy that overwrites (rather than appends to) those
+// headers on every inbound request — true on Vercel and most managed
+// platforms, but if this is ever self-hosted directly behind an untrusted
+// proxy (or exposed with no proxy at all), a client can set an arbitrary
+// X-Forwarded-For value to get a fresh rate-limit bucket per request.
 export function clientIp(req: Request): string {
   const forwarded = req.headers.get("x-forwarded-for");
   if (forwarded) return forwarded.split(",")[0].trim();

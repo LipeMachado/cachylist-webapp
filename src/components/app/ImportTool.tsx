@@ -9,6 +9,7 @@ import {
 } from "@/lib/actions/import";
 import type { IdentifyResult } from "@/lib/services/identify";
 import { CATEGORY_KEYS, categoryLabel, FALLBACK_COVER } from "@/lib/media";
+import { searchPath, detailsUrl } from "@/lib/media-search";
 
 interface Card {
   key: string;
@@ -39,37 +40,6 @@ const IDENTIFY_GAP_MS = 250;
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
-}
-
-function searchPath(category: string): string | null {
-  switch (category) {
-    case "anime":
-    case "anime_movie":
-      return "/app/anilist/search";
-    case "movie":
-    case "series":
-      return "/app/tmdb/search";
-    case "game":
-      return "/app/steam/search";
-    default:
-      return null;
-  }
-}
-
-function detailsUrl(category: string, id: number): string | null {
-  switch (category) {
-    case "anime":
-    case "anime_movie":
-      return `/app/anilist/details?id=${id}`;
-    case "movie":
-      return `/app/tmdb/details?id=${id}&type=movie`;
-    case "series":
-      return `/app/tmdb/details?id=${id}&type=tv`;
-    case "game":
-      return `/app/steam/details?id=${id}`;
-    default:
-      return null;
-  }
 }
 
 function titlesToCards(titles: string[]): Card[] {

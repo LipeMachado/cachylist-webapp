@@ -2,6 +2,7 @@
 
 import { createHash, randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
 import { AuthError } from "next-auth";
 import { signIn } from "@/auth";
 import { prisma } from "@/lib/prisma";
@@ -69,22 +70,40 @@ export async function registerAction(
       errors.push("Nome de usuário deve ter entre 3 e 30 caracteres");
   }
 
-  if (errors.length === 0 && username) {
-    const existingUsername = await prisma.user.findUnique({ where: { username } });
-    if (existingUsername) errors.push("Nome de usuário já está em uso");
-  }
-
+  // Both lookups only matter once the rest of the form is valid, and are
+  // independent of each other — run them concurrently.
+  const preValidated = errors.length === 0;
+  const [existingUsername, existingEmail] = await Promise.all([
+    preValidated && username ? prisma.user.findUnique({ where: { username } }) : null,
+    preValidated ? prisma.user.findUnique({ where: { email } }) : null,
+  ]);
+  if (existingUsername) errors.push("Nome de usuário já está em uso");
   if (errors.length > 0) return { error: errors.join(". ") };
 
-  // Don't reveal whether the email is already registered (avoids user
-  // enumeration); silently no-op and let the sign-in below fail/redirect
-  // the same way it would for a brand-new account.
-  const existingEmail = await prisma.user.findUnique({ where: { email } });
-  if (!existingEmail) {
-    const encryptedPassword = await bcrypt.hash(password, BCRYPT_COST);
+  const GENERIC_NOTICE =
+    "Cadastro processado. Se era uma conta nova, você já está conectado. Se este e-mail já tinha conta, entre pela tela de login.";
+
+  if (existingEmail) {
+    // Don't attempt sign-in with the submitted password for an email that's
+    // already registered: that would (a) leak a redirect/response-based
+    // oracle for enumerating registered emails, and (b) if the guess happened
+    // to be the real password, silently sign the caller into someone else's
+    // account. Return the same generic outcome as a fresh signup instead.
+    return { notice: GENERIC_NOTICE };
+  }
+
+  const encryptedPassword = await bcrypt.hash(password, BCRYPT_COST);
+  try {
     await prisma.user.create({
       data: { email, username: username || null, encryptedPassword },
     });
+  } catch (error) {
+    // Unique-constraint race: another request registered this email between
+    // our lookup above and this insert. Same generic outcome either way.
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return { notice: GENERIC_NOTICE };
+    }
+    throw error;
   }
 
   try {

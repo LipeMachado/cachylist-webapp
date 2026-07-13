@@ -1,10 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
-
-function normalize(value: string): string {
-  return value.toString().normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-}
+import { normalizeSearch } from "@/lib/text";
 
 // Ports search_dropdown_controller: filters suggestions, submits the form on select.
 export default function SearchDropdownInput({
@@ -37,12 +34,12 @@ export default function SearchDropdownInput({
   }, []);
 
   function search(v: string) {
-    const query = normalize(v);
+    const query = normalizeSearch(v);
     if (query.length < 1) {
       setOpen(false);
       return;
     }
-    const matches = suggestions.filter((s) => normalize(s).includes(query)).slice(0, 8);
+    const matches = suggestions.filter((s) => normalizeSearch(s).includes(query)).slice(0, 8);
     setFiltered(matches);
     setOpen(matches.length > 0);
   }

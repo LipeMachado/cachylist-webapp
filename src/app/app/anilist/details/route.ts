@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/auth";
+import { requireApiAuth, isNumericId } from "@/lib/api-helpers";
 import { anilistDetails } from "@/lib/services/anilist";
 
 export async function GET(req: Request) {
-  const session = await auth();
-  if (!session?.user) return NextResponse.json({}, { status: 401 });
+  if (!(await requireApiAuth())) return NextResponse.json({}, { status: 401 });
 
   const id = new URL(req.url).searchParams.get("id");
-  if (!id) return NextResponse.json({});
+  if (!isNumericId(id)) return NextResponse.json({});
   return NextResponse.json(await anilistDetails(id));
 }

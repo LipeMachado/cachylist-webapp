@@ -12,18 +12,23 @@ import {
   statusClass,
   statusKey,
   categoryLabel,
-  coverFor,
   toCardData,
   type CategoryKey,
   type StatusKey,
 } from "@/lib/media";
-import type { MediaItem } from "@prisma/client";
 import Board from "@/components/app/Board";
 import MediaCard from "@/components/app/MediaCard";
+import InfiniteMediaGrid from "@/components/app/InfiniteMediaGrid";
 import SearchDropdownInput from "@/components/app/SearchDropdownInput";
 import { AddMediaButton, MobileMenuButton } from "@/components/app/buttons";
 import { EmptyState } from "@/components/app/buttons";
 import ViewToggle from "@/components/app/ViewToggle";
+import {
+  LIBRARY_PAGE_SIZE,
+  filterMediaItems,
+  filterByStatus,
+  sortMediaItems,
+} from "@/lib/library-query";
 
 export interface LibrarySearchParams {
   query?: string;
@@ -32,10 +37,6 @@ export interface LibrarySearchParams {
   platform?: string;
   sort?: string;
   view?: string;
-}
-
-function normalize(value: string): string {
-  return value.toString().normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
 function pluralize(word: string): string {
@@ -56,20 +57,6 @@ function hrefWith(
   }
   const s = qs.toString();
   return s ? `${basePath}?${s}` : basePath;
-}
-
-function sortItems(items: MediaItem[], sort?: string): MediaItem[] {
-  const arr = [...items];
-  switch (sort) {
-    case "title":
-      return arr.sort((a, b) => a.title.localeCompare(b.title));
-    case "year":
-      return arr.sort((a, b) => (b.releaseYear ?? -Infinity) - (a.releaseYear ?? -Infinity));
-    case "recent":
-      return arr.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
-    default:
-      return arr; // keep the manual board order (sortOrder asc)
-  }
 }
 
 const SORTS: { key: string; label: string }[] = [
@@ -108,15 +95,11 @@ export default async function LibraryView({
 
   // `base` = everything filtered EXCEPT status (so the status tabs can show counts
   // and the board can populate every column).
-  let base = allItems;
-  if (filterCategory) base = base.filter((i) => i.category === CATEGORY_TO_INT[filterCategory]);
-  if (searchParams.platform) base = base.filter((i) => i.platform === searchParams.platform);
-  if (searchParams.query) {
-    const q = normalize(searchParams.query);
-    base = base.filter((i) =>
-      normalize([i.title, i.platform, i.author, i.releaseYear].filter(Boolean).join(" ")).includes(q)
-    );
-  }
+  const base = filterMediaItems(allItems, {
+    category: filterCategory ?? undefined,
+    platform: searchParams.platform,
+    query: searchParams.query,
+  });
 
   const activeStatus =
     searchParams.status && searchParams.status in STATUS_TO_INT
@@ -124,11 +107,12 @@ export default async function LibraryView({
       : null;
 
   // Grid items: also filtered by the active status tab, then sorted. Group by
-  // statusKey() so legacy "backlog" (int 5) items fold into Para Depois.
-  const gridItems = sortItems(
-    activeStatus ? base.filter((i) => statusKey(i.status) === activeStatus) : base,
-    searchParams.sort
-  );
+  // statusKey() so legacy "backlog" (int 5) items fold into Para Depois. Only
+  // the first page is rendered here — InfiniteMediaGrid fetches the rest
+  // (LIBRARY_PAGE_SIZE at a time) from /app/library/items as the user scrolls.
+  const gridItems = sortMediaItems(filterByStatus(base, searchParams.status), searchParams.sort);
+  const gridFirstPage = gridItems.slice(0, LIBRARY_PAGE_SIZE).map(toCardData);
+  const gridHasMore = gridItems.length > LIBRARY_PAGE_SIZE;
 
   const countFor = (status: StatusKey) =>
     base.filter((i) => statusKey(i.status) === status).length;
@@ -302,32 +286,18 @@ export default async function LibraryView({
             Nenhum item neste status.
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(116px,1fr))] border-t border-l border-[var(--line)]">
-            {gridItems.map((item) => (
-              <Link
-                key={item.id}
-                href={`/app/media_items/${item.id}`}
-                prefetch={false}
-                className="group block bg-[var(--card-bg)] p-2.5 border-r border-b border-[var(--line)] hover:bg-[var(--hover-bg)] transition-colors"
-              >
-                <div className="aspect-[2/3] overflow-hidden border border-[var(--line-soft)] bg-[var(--surface-2)]">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={coverFor(item)}
-                    alt={`Capa de ${item.title}`}
-                    loading="lazy"
-                    className="w-full h-full object-cover grayscale-[20%] group-hover:grayscale-0 transition duration-200"
-                  />
-                </div>
-                <div className="mt-2 flex items-start gap-1.5">
-                  <span className={`status-dot mt-[3px] flex-[0_0_auto] ${statusClass(statusKey(item.status))}`} />
-                  <strong className="text-[11px] font-bold leading-tight tracking-[.04em] uppercase line-clamp-2 text-[var(--text)]">
-                    {item.title}
-                  </strong>
-                </div>
-              </Link>
-            ))}
-          </div>
+          <InfiniteMediaGrid
+            key={`${basePath}?${filterCategory ?? ""}|${activeStatus ?? ""}|${searchParams.platform ?? ""}|${searchParams.query ?? ""}|${searchParams.sort ?? ""}`}
+            initialItems={gridFirstPage}
+            initialHasMore={gridHasMore}
+            filters={{
+              category: filterCategory ?? "",
+              status: activeStatus ?? "",
+              platform: searchParams.platform ?? "",
+              query: searchParams.query ?? "",
+              sort: searchParams.sort ?? "",
+            }}
+          />
         )}
       </section>
     </>

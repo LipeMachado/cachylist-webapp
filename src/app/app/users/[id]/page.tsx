@@ -25,8 +25,10 @@ export default async function UserProfilePage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const currentUser = await requireUser();
-  const profileUser = await prisma.user.findUnique({ where: { id: Number(id) } });
+  const [currentUser, profileUser] = await Promise.all([
+    requireUser(),
+    prisma.user.findUnique({ where: { id: Number(id) } }),
+  ]);
   if (!profileUser) notFound();
 
   const isOwner = profileUser.id === currentUser.id;

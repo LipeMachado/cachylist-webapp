@@ -77,8 +77,13 @@ const MAX_TITLE_LENGTH = 500;
 const MAX_TEXT_LENGTH = 5000;
 const MAX_URL_LENGTH = 2000;
 
-function clip(value: string | undefined, max: number): string | null {
-  const trimmed = value?.trim();
+// `items` arrives as a plain-object Server Action argument, not FormData, so
+// TS types on ImportItemInput aren't enforced at the wire level — a raw POST
+// could send a non-string field (e.g. a number). Coerce before trimming
+// instead of assuming `value` is a string.
+function clip(value: unknown, max: number): string | null {
+  if (value == null) return null;
+  const trimmed = String(value).trim();
   return trimmed ? trimmed.slice(0, max) : null;
 }
 
@@ -107,13 +112,12 @@ export async function createItems(
     const title = clip(data.title, MAX_TITLE_LENGTH);
     if (!title) continue;
 
-    const categoryKey = (data.category?.trim() || "anime") as CategoryKey;
-    const statusKey = (data.status?.trim() || "planned") as keyof typeof STATUS_TO_INT;
+    const categoryKey = (clip(data.category, 50) ?? "anime") as CategoryKey;
+    const statusKey = (clip(data.status, 50) ?? "planned") as keyof typeof STATUS_TO_INT;
     const statusInt = STATUS_TO_INT[statusKey] ?? STATUS_TO_INT.planned;
 
-    const releaseYear = data.release_year?.trim()
-      ? Number(data.release_year)
-      : null;
+    const releaseYearStr = clip(data.release_year, 10);
+    const releaseYear = releaseYearStr ? Number(releaseYearStr) : null;
 
     if (!maxByStatus.has(statusInt)) {
       const agg = await prisma.mediaItem.aggregate({

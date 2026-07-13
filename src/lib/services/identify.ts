@@ -4,6 +4,7 @@
 import { anilistSearch } from "./anilist";
 import { tmdbSearch } from "./tmdb";
 import { steamSearch } from "./steam";
+import { normalizeTitle } from "@/lib/text";
 
 export interface IdentifyResult {
   category: "anime" | "anime_movie" | "movie" | "series" | "game";
@@ -14,20 +15,11 @@ export interface IdentifyResult {
   id: number;
 }
 
-function norm(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
 // 0..1 similarity between the query and a candidate title.
 function sim(query: string, candidate: string | null | undefined): number {
   if (!candidate) return 0;
-  const a = norm(query);
-  const b = norm(candidate);
+  const a = normalizeTitle(query);
+  const b = normalizeTitle(candidate);
   if (!a || !b) return 0;
   if (a === b) return 1;
   if (b.startsWith(a) || a.startsWith(b)) return 0.85;
@@ -49,11 +41,9 @@ export async function identifyTitle(query: string): Promise<IdentifyResult | nul
   const q = query.trim();
   if (q.length < 2) return null;
 
-  const [ani, tmdb, steam] = await Promise.all([
-    anilistSearch(q).catch(() => []),
-    tmdbSearch(q).catch(() => []),
-    steamSearch(q).catch(() => []),
-  ]);
+  // Each of these already catches its own errors internally and resolves to
+  // [] on failure — no .catch() needed here.
+  const [ani, tmdb, steam] = await Promise.all([anilistSearch(q), tmdbSearch(q), steamSearch(q)]);
 
   const cands: Candidate[] = [];
 
